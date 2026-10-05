@@ -89,9 +89,7 @@
         "state": {
           "standard": "Standard",
           "eco": "Eco",
-          "boost": "Boost",
-          "cooling": "Cooling",
-          "standby": "Standby"
+          "boost": "Boost"
         }
       },
       "active_keg": { "name": "Active Keg" }

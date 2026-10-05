@@ -89,9 +89,7 @@
         "state": {
           "standard": "Standard",
           "eco": "Éco",
-          "boost": "Boost",
-          "cooling": "Refroidissement",
-          "standby": "Veille"
+          "boost": "Boost"
         }
       },
       "active_keg": { "name": "Fût installé" }
