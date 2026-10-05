@@ -1,13 +1,13 @@
 """DataUpdateCoordinator for PerfectDraft."""
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 import logging
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError
 from homeassistant.helpers.update_coordinator import (
     DataUpdateCoordinator,
     UpdateFailed,
@@ -24,9 +24,27 @@ from .exceptions import (
     AuthenticationError,
     PerfectDraftApiError,
     PerfectDraftConnectionError,
+    PerfectDraftError,
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def get_setting_id(data: dict[str, Any] | None) -> str | None:
+    """Extract the machine setting resource ID from coordinator data."""
+    if not isinstance(data, dict):
+        return None
+    setting = data.get("setting")
+    if isinstance(setting, dict):
+        if setting.get("id") is not None:
+            return str(setting["id"])
+        iri = setting.get("@id")
+        if isinstance(iri, str) and "/" in iri:
+            tail = iri.rstrip("/").rsplit("/", 1)[-1]
+            if tail:
+                return tail
+    machine_id = data.get("_machine_id") or data.get("id")
+    return str(machine_id) if machine_id is not None else None
 
 
 class PerfectDraftDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
@@ -92,3 +110,66 @@ class PerfectDraftDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.debug("Active keg lookup failed: %s", err)
 
         return details
+
+    async def async_update_settings(self, **changes: Any) -> None:
+        """Update machine settings via the API and refresh local coordinator state."""
+        data = self.data or {}
+        setting_id = get_setting_id(data) or self.config_entry.data.get(CONF_MACHINE_ID)
+        if not setting_id:
+            raise HomeAssistantError("PerfectDraft setting ID is unavailable")
+
+        current_setting = (
+            dict(data["setting"]) if isinstance(data.get("setting"), dict) else {}
+        )
+        try:
+            updated = await self.client.update_machine_settings(
+                setting_id, current_setting, **changes
+            )
+        except PerfectDraftError as err:
+            raise HomeAssistantError(
+                f"Failed to update PerfectDraft settings: {err}"
+            ) from err
+
+        if isinstance(self.data, dict):
+            merged = dict(current_setting)
+            if isinstance(updated, dict):
+                merged.update(updated)
+            merged.update(changes)
+            self.data["setting"] = merged
+            self.async_update_listeners()
+
+        await self.async_request_refresh()
+
+    async def async_set_active_keg(self, product_id: int) -> None:
+        """Set the active keg via the API and refresh local coordinator state."""
+        data = self.data or {}
+        machine_id = data.get("_machine_id") or self.config_entry.data.get(
+            CONF_MACHINE_ID
+        )
+        if not machine_id:
+            raise HomeAssistantError("PerfectDraft machine ID is unavailable")
+
+        now = datetime.now(timezone.utc)
+        try:
+            created = await self.client.set_active_keg(
+                machine_id, int(product_id), now
+            )
+        except PerfectDraftError as err:
+            raise HomeAssistantError(
+                f"Failed to set active PerfectDraft keg: {err}"
+            ) from err
+
+        if isinstance(self.data, dict):
+            keg_active = {
+                "keg": f"/api/products/{int(product_id)}",
+                "insertedAt": now.isoformat(),
+            }
+            if isinstance(created, dict):
+                if created.get("keg"):
+                    keg_active["keg"] = created["keg"]
+                if created.get("insertedAt"):
+                    keg_active["insertedAt"] = created["insertedAt"]
+            self.data["kegActive"] = keg_active
+            self.async_update_listeners()
+
+        await self.async_request_refresh()
