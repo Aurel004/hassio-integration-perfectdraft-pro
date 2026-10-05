@@ -8,16 +8,16 @@ The integration SHALL provide an async API client class (`PerfectDraftApiClient`
 - **THEN** it SHALL store the session and set the base URL to `https://api.perfectdraft.com`
 
 ### Requirement: Sign-in with reCAPTCHA token
-The client SHALL authenticate by POSTing to `/authentication/sign-in` with email, password, recaptchaToken, and recaptchaAction fields. The `x-api-key` SHALL be sent as a header. The `recaptchaAction` SHALL be `Magento/login`.
+The client SHALL authenticate by calling AWS Cognito `InitiateAuth` directly at `https://cognito-idp.eu-west-1.amazonaws.com/` with `AuthFlow: USER_PASSWORD_AUTH`, the Cognito client ID, `AuthParameters` (`USERNAME`, `PASSWORD`), and `ClientMetadata` (`recaptchaToken`, `recaptchaAction: Magento/login`, `domain: https://www.perfectdraft.com`). The `/authentication/sign-in` gateway does not forward `domain` to the PreAuthentication Lambda and SHALL NOT be used.
 
 #### Scenario: Successful sign-in
 - **WHEN** the client calls `authenticate(email, password, recaptcha_token)`
-- **THEN** it SHALL POST to `/authentication/sign-in` with the correct payload and `x-api-key` header
-- **THEN** it SHALL store the returned `AccessToken`, `IdToken`, and `RefreshToken`
+- **THEN** it SHALL POST the `InitiateAuth` request to Cognito and parse the response with `content_type=None`
+- **THEN** it SHALL store and return `AccessToken`, `IdToken`, and `RefreshToken` from `AuthenticationResult`
 
 #### Scenario: Sign-in failure
-- **WHEN** the API returns 400, 401, or 403
-- **THEN** the client SHALL raise `AuthenticationError` with the status and response body
+- **WHEN** Cognito returns 400, 401, or 403, or returns a challenge without tokens
+- **THEN** the client SHALL raise `AuthenticationError`
 
 ### Requirement: Token refresh via Cognito
 The client SHALL refresh expired access tokens by calling AWS Cognito directly at `https://cognito-idp.eu-west-1.amazonaws.com/`, bypassing the API gateway and reCAPTCHA. The Cognito client ID is `57ddq2ppqg2jcpup06r2g1deur`.
