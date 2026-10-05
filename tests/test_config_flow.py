@@ -376,7 +376,9 @@ def test_abort_reason_scanner_sees_the_known_reasons() -> None:
     } <= _abort_reasons_in_source()
 
 
-@pytest.mark.parametrize("filename", ["strings.json", "translations/en.json"])
+@pytest.mark.parametrize(
+    "filename", ["strings.json", "translations/en.json", "translations/fr.json"]
+)
 def test_every_abort_reason_is_translated(filename: str) -> None:
     declared = json.loads(
         (COMPONENT_DIR / filename).read_text(encoding="utf-8")

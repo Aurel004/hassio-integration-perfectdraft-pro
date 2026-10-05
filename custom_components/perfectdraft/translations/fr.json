@@ -1,0 +1,69 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Compte PerfectDraft",
+        "description": "Saisissez les identifiants de votre application PerfectDraft.",
+        "data": {
+          "email": "E-mail",
+          "password": "Mot de passe"
+        }
+      },
+      "token": {
+        "title": "Jeton de vérification",
+        "description": "Collez un jeton de vérification généré depuis le site PerfectDraft. Consultez les [instructions de configuration](https://github.com/Falkvinge/hassio-integration-perfectdraft-pro#step-2-verification-token) pour la marche à suivre en 30 secondes. Le jeton expire au bout de 2 minutes, générez-le juste avant de le coller.",
+        "data": {
+          "recaptcha_token": "Jeton de vérification"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Ré-authentifier PerfectDraft",
+        "description": "Votre session a expiré. Veuillez saisir à nouveau vos identifiants.",
+        "data": {
+          "email": "E-mail",
+          "password": "Mot de passe"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Échec de l'authentification. Le jeton a peut-être expiré (limite de 2 min) ou les identifiants sont incorrects. Réessayez avec un nouveau jeton.",
+      "cannot_connect": "Impossible de se connecter au service PerfectDraft.",
+      "unknown": "Une erreur inattendue s'est produite."
+    },
+    "abort": {
+      "already_configured": "Ce compte PerfectDraft est déjà configuré.",
+      "reauth_successful": "Ré-authentification réussie.",
+      "reauth_account_mismatch": "Ces identifiants correspondent à un autre compte PerfectDraft. Ré-authentifiez-vous avec le compte initialement configuré, ou supprimez l'intégration et ajoutez l'autre compte séparément.",
+      "already_in_progress": "La configuration de ce compte PerfectDraft est déjà en cours. Terminez ou annulez d'abord le flux en attente dans Paramètres > Appareils et services."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "temperature": { "name": "Température" },
+      "keg_remaining": { "name": "Niveau du fût" },
+      "keg_product_id": { "name": "ID du fût" },
+      "keg_name": { "name": "Fût" },
+      "connection": { "name": "Connexion" },
+      "door": { "name": "Porte" },
+      "pours": { "name": "Verres servis" },
+      "last_pour": { "name": "Dernier tirage" },
+      "keg_pressure": { "name": "Pression du fût" },
+      "firmware": { "name": "Firmware" },
+      "mode": { "name": "Mode" },
+      "keg_freshness": { "name": "Fraîcheur du fût" }
+    },
+    "button": {
+      "mark_keg_changed": { "name": "Marquer le fût comme changé" }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Options PerfectDraft",
+        "data": {
+          "scan_interval": "Intervalle d'actualisation (secondes)"
+        }
+      }
+    }
+  }
+}

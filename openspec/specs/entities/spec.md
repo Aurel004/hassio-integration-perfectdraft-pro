@@ -131,6 +131,18 @@ The integration SHALL expose the current operating mode.
 - **WHEN** the coordinator has data
 - **THEN** the sensor SHALL report `setting.mode` (e.g., "standard", "eco")
 
+### Requirement: Keg pressure sensor
+The integration SHALL expose the air pressure inside the keg.
+
+#### Scenario: Keg pressure
+- **WHEN** `details.kegPressure` is present
+- **THEN** the sensor SHALL report it as a float in kPa
+- **THEN** it SHALL have device class pressure, state class MEASUREMENT and icon mdi:gauge
+
+#### Scenario: No pressure reading
+- **WHEN** `details.kegPressure` is null
+- **THEN** the sensor SHALL report unavailable
+
 ### Requirement: Firmware sensor
 The integration SHALL expose the firmware version, disabled by default.
 
@@ -202,8 +214,8 @@ All entities SHALL have stable unique IDs derived from the machine ID and entity
 - **THEN** each entity's unique ID SHALL follow the pattern `{machine_id}_{entity_key}`
 
 ### Requirement: Entity name translations
-All entities SHALL have translated names via `translation_key` and corresponding entries in `strings.json` and `translations/en.json`.
+All entities SHALL have translated names via `translation_key` and corresponding entries in `strings.json`, `translations/en.json`, and `translations/fr.json`.
 
 #### Scenario: Names displayed
 - **WHEN** HA renders the entity list
-- **THEN** each sensor SHALL display its translated name (Temperature, Keg Remaining, Keg Product, Keg, Connection, Door, Pours, Last Pour, Firmware, Mode, Keg Freshness)
+- **THEN** each sensor SHALL display its translated name (Temperature, Keg Remaining, Keg Product, Keg, Connection, Door, Pours, Last Pour, Keg Pressure, Firmware, Mode, Keg Freshness) in the user's configured language

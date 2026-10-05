@@ -7,7 +7,7 @@ A Home Assistant custom integration for the [PerfectDraft Pro](https://www.perfe
 | Sensor | Description | Unit |
 |--------|-------------|------|
 | Temperature | Current beer temperature | °C |
-| Keg | Name of the tapped beer, resolved from a [bundled catalog](#the-keg-name-catalog) of 116 kegs | — |
+| Keg | Name of the tapped beer, resolved from a [bundled catalog](#the-keg-name-catalog) of 117 kegs | — |
 | Keg Product | Numeric product ID of the fitted keg | — |
 | Keg Remaining | Beer left in the keg | % |
 | Keg Freshness | Days remaining until 30-day freshness expires | days |
@@ -15,6 +15,7 @@ A Home Assistant custom integration for the [PerfectDraft Pro](https://www.perfe
 | Door | Door open/closed state | — |
 | Pours | Number of pours since keg was loaded | — |
 | Last Pour | Volume of the most recent pour | mL |
+| Keg Pressure | Air pressure in the keg; drops on each pour | kPa |
 | Mode | Current operating mode (standard, eco, etc.) | — |
 | Firmware | Machine firmware version (disabled by default) | — |
 
