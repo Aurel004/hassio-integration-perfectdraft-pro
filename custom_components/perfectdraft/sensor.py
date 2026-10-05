@@ -15,7 +15,13 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import PERCENTAGE, UnitOfPressure, UnitOfTemperature
+from homeassistant.const import (
+    PERCENTAGE,
+    UnitOfPressure,
+    UnitOfTemperature,
+    UnitOfTime,
+    UnitOfVolume,
+)
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
@@ -23,7 +29,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, keg_changed_signal
+from .const import DOMAIN, MODE_OPTIONS, keg_changed_signal
 from .coordinator import PerfectDraftDataUpdateCoordinator
 from .keg_detection import KEG_TOTAL_VOLUME, detect_keg_change
 from .temperature import beer_temperature
@@ -35,7 +41,9 @@ KEG_FRESHNESS_DAYS = 30
 
 def _load_keg_catalog() -> dict[int, str]:
     try:
-        raw = json.loads((Path(__file__).parent / "keg_catalog.json").read_text())
+        raw = json.loads(
+            (Path(__file__).parent / "keg_catalog.json").read_text(encoding="utf-8")
+        )
         return {int(k): v for k, v in raw.items()}
     except (OSError, ValueError) as err:
         _LOGGER.debug("Could not load keg catalog: %s", err)
@@ -60,42 +68,104 @@ def _get_temperature(data: dict) -> float | None:
     return beer_temperature(_get_details(data))
 
 
+def _get_target_temperature(data: dict) -> float | None:
+    setting = data.get("setting") or {}
+    val = setting.get("temperature")
+    if val is None:
+        return None
+    try:
+        num = float(val)
+    except (TypeError, ValueError):
+        return None
+    return num if -20.0 <= num <= 50.0 else None
+
+
 def _get_volume_remaining(data: dict) -> float | None:
     vol = _get_details(data).get("kegVolume")
     if vol is None:
         return None
-    return round(float(vol) / KEG_TOTAL_VOLUME * 100, 1)
+    try:
+        return round(float(vol) / KEG_TOTAL_VOLUME * 100, 1)
+    except (TypeError, ValueError):
+        return None
+
+
+def _get_keg_volume_liters(data: dict) -> float | None:
+    vol = _get_details(data).get("kegVolume")
+    if vol is None:
+        return None
+    try:
+        num = float(vol)
+    except (TypeError, ValueError):
+        return None
+    return round(num, 2) if 0.0 <= num <= 10.0 else None
 
 
 def _get_connection_state(data: dict) -> str | None:
     state = _get_details(data).get("connectedState")
     if state is None:
         return None
-    return "Connected" if state else "Disconnected"
+    return "connected" if state else "disconnected"
 
 
 def _get_door_state(data: dict) -> str | None:
     closed = _get_details(data).get("doorClosed")
     if closed is None:
         return None
-    return "Closed" if closed else "Open"
+    return "closed" if closed else "open"
 
 
 def _get_pours(data: dict) -> int | None:
     val = _get_details(data).get("numberOfPoursSinceStartup")
-    return int(val) if val is not None else None
+    if val is None:
+        return None
+    try:
+        return int(val)
+    except (TypeError, ValueError):
+        return None
 
 
 def _get_last_pour_volume(data: dict) -> float | None:
     val = _get_details(data).get("volumeOfLastPour")
     if val is None or val == 0:
         return None
-    return round(float(val) * 1000)  # litres -> ml
+    try:
+        return round(float(val) * 1000)  # litres -> ml
+    except (TypeError, ValueError):
+        return None
+
+
+def _get_last_pour_duration(data: dict) -> float | None:
+    val = _get_details(data).get("durationOfLastPour")
+    if val is None:
+        return None
+    try:
+        ms = float(val)
+    except (TypeError, ValueError):
+        return None
+    if ms <= 0:
+        return None
+    return round(ms / 1000.0, 1)
 
 
 def _get_keg_pressure(data: dict) -> float | None:
     val = _get_details(data).get("kegPressure")
-    return float(val) if val is not None else None
+    if val is None:
+        return None
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return None
+
+
+def _get_error_code(data: dict) -> int | None:
+    val = _get_details(data).get("errorCodes")
+    if val is None:
+        return None
+    try:
+        return int(val)
+    except (TypeError, ValueError):
+        return None
 
 
 def _get_firmware(data: dict) -> str | None:
@@ -104,7 +174,11 @@ def _get_firmware(data: dict) -> str | None:
 
 def _get_mode(data: dict) -> str | None:
     setting = data.get("setting") or {}
-    return setting.get("mode")
+    val = setting.get("mode")
+    if not isinstance(val, str):
+        return None
+    lower = val.strip().lower()
+    return lower if lower in MODE_OPTIONS else None
 
 
 def _get_keg_product_id(data: dict) -> int | None:
@@ -129,7 +203,8 @@ def _keg_inserted_at(data: dict) -> datetime | None:
     if not iso:
         return None
     try:
-        return datetime.fromisoformat(iso)
+        dt = datetime.fromisoformat(iso)
+        return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
     except (ValueError, TypeError):
         return None
 
@@ -145,6 +220,16 @@ SENSOR_DESCRIPTIONS: tuple[PerfectDraftSensorDescription, ...] = (
         value_fn=_get_temperature,
     ),
     PerfectDraftSensorDescription(
+        key="target_temperature",
+        translation_key="target_temperature",
+        device_class=SensorDeviceClass.TEMPERATURE,
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:thermostat",
+        suggested_display_precision=0,
+        value_fn=_get_target_temperature,
+    ),
+    PerfectDraftSensorDescription(
         key="keg_remaining",
         translation_key="keg_remaining",
         native_unit_of_measurement=PERCENTAGE,
@@ -152,6 +237,16 @@ SENSOR_DESCRIPTIONS: tuple[PerfectDraftSensorDescription, ...] = (
         icon="mdi:keg",
         suggested_display_precision=0,
         value_fn=_get_volume_remaining,
+    ),
+    PerfectDraftSensorDescription(
+        key="keg_volume",
+        translation_key="keg_volume",
+        device_class=SensorDeviceClass.VOLUME_STORAGE,
+        native_unit_of_measurement=UnitOfVolume.LITERS,
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:keg",
+        suggested_display_precision=2,
+        value_fn=_get_keg_volume_liters,
     ),
     PerfectDraftSensorDescription(
         key="keg_product_id",
@@ -168,12 +263,16 @@ SENSOR_DESCRIPTIONS: tuple[PerfectDraftSensorDescription, ...] = (
     PerfectDraftSensorDescription(
         key="connection",
         translation_key="connection",
+        device_class=SensorDeviceClass.ENUM,
+        options=["connected", "disconnected"],
         icon="mdi:wifi",
         value_fn=_get_connection_state,
     ),
     PerfectDraftSensorDescription(
         key="door",
         translation_key="door",
+        device_class=SensorDeviceClass.ENUM,
+        options=["closed", "open"],
         icon="mdi:door",
         value_fn=_get_door_state,
     ),
@@ -192,6 +291,16 @@ SENSOR_DESCRIPTIONS: tuple[PerfectDraftSensorDescription, ...] = (
         value_fn=_get_last_pour_volume,
     ),
     PerfectDraftSensorDescription(
+        key="last_pour_duration",
+        translation_key="last_pour_duration",
+        device_class=SensorDeviceClass.DURATION,
+        native_unit_of_measurement=UnitOfTime.SECONDS,
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:timer-outline",
+        suggested_display_precision=1,
+        value_fn=_get_last_pour_duration,
+    ),
+    PerfectDraftSensorDescription(
         key="keg_pressure",
         translation_key="keg_pressure",
         device_class=SensorDeviceClass.PRESSURE,
@@ -200,6 +309,12 @@ SENSOR_DESCRIPTIONS: tuple[PerfectDraftSensorDescription, ...] = (
         icon="mdi:gauge",
         suggested_display_precision=1,
         value_fn=_get_keg_pressure,
+    ),
+    PerfectDraftSensorDescription(
+        key="error_code",
+        translation_key="error_code",
+        icon="mdi:alert-circle-outline",
+        value_fn=_get_error_code,
     ),
     PerfectDraftSensorDescription(
         key="firmware",
@@ -211,6 +326,8 @@ SENSOR_DESCRIPTIONS: tuple[PerfectDraftSensorDescription, ...] = (
     PerfectDraftSensorDescription(
         key="mode",
         translation_key="mode",
+        device_class=SensorDeviceClass.ENUM,
+        options=list(MODE_OPTIONS),
         icon="mdi:thermostat",
         value_fn=_get_mode,
     ),
@@ -300,7 +417,10 @@ class PerfectDraftKegFreshnessSensor(
             iso = last_state.attributes.get("keg_inserted_at")
             if iso:
                 try:
-                    self._keg_inserted_at = datetime.fromisoformat(iso)
+                    dt = datetime.fromisoformat(iso)
+                    self._keg_inserted_at = (
+                        dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+                    )
                 except (ValueError, TypeError):
                     pass
             pours = last_state.attributes.get("last_pours")
@@ -338,7 +458,8 @@ class PerfectDraftKegFreshnessSensor(
 
         reported = _keg_inserted_at(data)
         if reported is not None:
-            self._keg_inserted_at = reported
+            if self._keg_inserted_at is None or reported > self._keg_inserted_at:
+                self._keg_inserted_at = reported
         else:
             details = data.get("details") or {}
             pours = details.get("numberOfPoursSinceStartup")
@@ -377,12 +498,15 @@ class PerfectDraftKegFreshnessSensor(
         self.async_write_ha_state()
 
     def _inserted_at(self) -> datetime | None:
-        """The current insertion date, preferring the live API value."""
-        if self.coordinator.data:
-            reported = _keg_inserted_at(self.coordinator.data)
-            if reported is not None:
-                return reported
-        return self._keg_inserted_at
+        """The current insertion date, preferring the latest of API and local state."""
+        reported = (
+            _keg_inserted_at(self.coordinator.data)
+            if self.coordinator.data
+            else None
+        )
+        if reported is not None and self._keg_inserted_at is not None:
+            return max(reported, self._keg_inserted_at)
+        return reported or self._keg_inserted_at
 
     @property
     def native_value(self) -> int | None:

@@ -40,20 +40,65 @@
   "entity": {
     "sensor": {
       "temperature": { "name": "Temperature" },
+      "target_temperature": { "name": "Target Temperature" },
       "keg_remaining": { "name": "Keg Remaining" },
+      "keg_volume": { "name": "Keg Remaining Volume" },
       "keg_product_id": { "name": "Keg Product" },
       "keg_name": { "name": "Keg" },
-      "connection": { "name": "Connection" },
-      "door": { "name": "Door" },
+      "connection": {
+        "name": "Connection",
+        "state": {
+          "connected": "Connected",
+          "disconnected": "Disconnected"
+        }
+      },
+      "door": {
+        "name": "Door",
+        "state": {
+          "closed": "Closed",
+          "open": "Open"
+        }
+      },
       "pours": { "name": "Pours" },
       "last_pour": { "name": "Last Pour" },
+      "last_pour_duration": { "name": "Last Pour Duration" },
       "keg_pressure": { "name": "Keg Pressure" },
       "firmware": { "name": "Firmware" },
-      "mode": { "name": "Mode" },
+      "mode": {
+        "name": "Mode",
+        "state": {
+          "standard": "Standard",
+          "eco": "Eco",
+          "boost": "Boost",
+          "cooling": "Cooling",
+          "standby": "Standby"
+        }
+      },
+      "error_code": { "name": "Error Code" },
       "keg_freshness": { "name": "Keg Freshness" }
     },
     "button": {
       "mark_keg_changed": { "name": "Mark Keg Changed" }
+    },
+    "number": {
+      "target_temperature": { "name": "Target Temperature" }
+    },
+    "select": {
+      "mode": {
+        "name": "Mode",
+        "state": {
+          "standard": "Standard",
+          "eco": "Eco",
+          "boost": "Boost",
+          "cooling": "Cooling",
+          "standby": "Standby"
+        }
+      },
+      "active_keg": { "name": "Active Keg" }
+    },
+    "switch": {
+      "boost": { "name": "Boost Mode" },
+      "eco_mode": { "name": "Eco Mode" }
     }
   },
   "options": {

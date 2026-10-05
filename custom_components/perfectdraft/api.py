@@ -1,6 +1,7 @@
 """Async API client for the PerfectDraft cloud service."""
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import json
 import logging
 from typing import Any
@@ -28,6 +29,21 @@ COGNITO_HEADERS = {
     "Content-Type": "application/x-amz-json-1.1",
     "X-Amz-Target": "AWSCognitoIdentityProviderService.InitiateAuth",
 }
+
+_WRITABLE_SETTING_FIELDS = (
+    "temperature",
+    "temperatureMin",
+    "temperatureMax",
+    "temperatureUnit",
+    "pressure",
+    "boost",
+    "volumeThreshold",
+    "ecoModeEnabled",
+    "ecoModeBeerTemperatureSetPoint",
+    "ecoModeSchedulerEnabled",
+    "ecoModeAbortedByAppliance",
+    "mode",
+)
 
 
 class PerfectDraftApiClient:
@@ -170,7 +186,8 @@ class PerfectDraftApiClient:
     ) -> dict[str, Any]:
         """Make an authenticated API request with automatic 401 retry."""
         url = f"{self._base}{path}"
-        headers = kwargs.pop("headers", {})
+        headers = dict(kwargs.pop("headers", {}))
+        headers.setdefault("Accept", "application/json")
         headers["x-api-key"] = API_KEY
         if self._access_token:
             headers["x-access-token"] = self._access_token
@@ -195,14 +212,14 @@ class PerfectDraftApiClient:
                         if retry_resp.status >= 400:
                             body = await retry_resp.text()
                             raise PerfectDraftApiError(retry_resp.status, body)
-                        return await retry_resp.json()
+                        return await retry_resp.json(content_type=None)
 
                 if resp.status == 429:
                     raise PerfectDraftApiError(429, "Rate limited")
                 if resp.status >= 400:
                     body = await resp.text()
                     raise PerfectDraftApiError(resp.status, body)
-                return await resp.json()
+                return await resp.json(content_type=None)
         except aiohttp.ClientError as exc:
             raise PerfectDraftConnectionError(str(exc)) from exc
 
@@ -229,3 +246,76 @@ class PerfectDraftApiClient:
             f"/api/perfectdraft_machines/{machine_id}",
             params={"groups[]": "perfectdraft_keg_active_read"},
         )
+
+    async def update_machine_settings(
+        self,
+        setting_id: str | int | None,
+        current_setting: dict[str, Any] | None = None,
+        **changes: Any,
+    ) -> dict[str, Any]:
+        """PUT /api/perfectdraft_machine_settings/{setting_id}.
+
+        Preserves existing writable fields from ``current_setting`` so a PUT
+        does not reset unrelated fields to server defaults.
+        """
+        if setting_id is None or isinstance(setting_id, bool):
+            raise PerfectDraftApiError(400, "Invalid machine setting ID")
+        sid = str(setting_id).strip()
+        if not sid or sid == "unknown":
+            raise PerfectDraftApiError(400, "Invalid machine setting ID")
+
+        payload: dict[str, Any] = {}
+        if isinstance(current_setting, dict):
+            for key in _WRITABLE_SETTING_FIELDS:
+                if key in current_setting and current_setting[key] is not None:
+                    payload[key] = current_setting[key]
+        for key, val in changes.items():
+            if key in _WRITABLE_SETTING_FIELDS:
+                payload[key] = val
+        return await self._request(
+            "PUT",
+            f"/api/perfectdraft_machine_settings/{sid}",
+            json=payload,
+        )
+
+    async def set_active_keg(
+        self,
+        machine_id: str | int | None,
+        product_id: int | str | None,
+        inserted_at: datetime | str | None = None,
+    ) -> dict[str, Any]:
+        """POST /api/perfectdraft_machine_kegs — record the currently tapped keg."""
+        if machine_id is None or isinstance(machine_id, bool):
+            raise PerfectDraftApiError(400, "Invalid machine ID")
+        mid = str(machine_id).strip()
+        if not mid or mid == "unknown":
+            raise PerfectDraftApiError(400, "Invalid machine ID")
+
+        if product_id is None or isinstance(product_id, bool):
+            raise PerfectDraftApiError(400, "Invalid keg product ID")
+        try:
+            pid = int(product_id)
+        except (TypeError, ValueError) as exc:
+            raise PerfectDraftApiError(400, f"Invalid keg product ID: {product_id}") from exc
+        if pid <= 0:
+            raise PerfectDraftApiError(400, f"Invalid keg product ID: {product_id}")
+
+        if isinstance(inserted_at, str) and inserted_at.strip():
+            inserted_str = inserted_at.strip()
+        else:
+            ts = (
+                inserted_at
+                if isinstance(inserted_at, datetime)
+                else datetime.now(timezone.utc)
+            ).astimezone(timezone.utc)
+            inserted_str = ts.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        payload = {
+            "machine": f"/api/perfectdraft_machines/{mid}",
+            "keg": f"/api/products/{pid}",
+            "insertedAt": inserted_str,
+        }
+        return await self._request(
+            "POST", "/api/perfectdraft_machine_kegs", json=payload
+        )
+

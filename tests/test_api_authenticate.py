@@ -69,7 +69,13 @@ class FakeSession:
         self.calls = []
 
     def post(self, url, json=None, headers=None):
-        self.calls.append({"url": url, "json": json, "headers": headers})
+        self.calls.append({"method": "POST", "url": url, "json": json, "headers": headers})
+        return FakeContext(FakeResponse(self.status, self.body), self.error)
+
+    def request(self, method, url, headers=None, **kwargs):
+        self.calls.append(
+            {"method": method, "url": url, "headers": headers, **kwargs}
+        )
         return FakeContext(FakeResponse(self.status, self.body), self.error)
 
 
@@ -171,5 +177,92 @@ class TestAuthenticate(unittest.TestCase):
             run(client.authenticate("a", "b", "c"))
 
 
+class TestMachineControlApi(unittest.TestCase):
+    def test_update_machine_settings_preserves_writable_fields(self):
+        updated = json.dumps({"id": 42, "temperature": 4, "mode": "eco", "boost": False})
+        session = FakeSession(status=200, body=updated)
+        client = api.PerfectDraftApiClient(session)
+        client.set_tokens(access_token="token-123")
+
+        current_setting = {
+            "id": 42,
+            "temperature": 3,
+            "temperatureMin": 0,
+            "temperatureMax": 12,
+            "temperatureUnit": "C",
+            "mode": "standard",
+            "boost": False,
+            "ecoModeEnabled": False,
+            "machines": ["/api/perfectdraft_machines/42"],  # read-only field
+        }
+
+        result = run(
+            client.update_machine_settings(
+                42, current_setting=current_setting, temperature=4, mode="eco"
+            )
+        )
+        self.assertEqual(result["temperature"], 4)
+        self.assertEqual(len(session.calls), 1)
+        call = session.calls[0]
+        self.assertEqual(call["method"], "PUT")
+        self.assertEqual(
+            call["url"],
+            "https://api.perfectdraft.com/api/perfectdraft_machine_settings/42",
+        )
+        self.assertEqual(
+            call["json"],
+            {
+                "temperature": 4,
+                "temperatureMin": 0,
+                "temperatureMax": 12,
+                "temperatureUnit": "C",
+                "mode": "eco",
+                "boost": False,
+                "ecoModeEnabled": False,
+            },
+        )
+        self.assertNotIn("machines", call["json"])
+
+    def test_update_machine_settings_rejects_invalid_id(self):
+        client = api.PerfectDraftApiClient(FakeSession())
+        client.set_tokens(access_token="token-123")
+        with self.assertRaises(exceptions.PerfectDraftApiError):
+            run(client.update_machine_settings(None, temperature=3))
+
+    def test_set_active_keg_posts_iri_references(self):
+        created = json.dumps(
+            {
+                "id": 999,
+                "machine": "/api/perfectdraft_machines/42",
+                "keg": "/api/products/1775",
+                "insertedAt": "2026-10-05T12:00:00Z",
+            }
+        )
+        session = FakeSession(status=201, body=created)
+        client = api.PerfectDraftApiClient(session)
+        client.set_tokens(access_token="token-123")
+
+        result = run(
+            client.set_active_keg(42, 1775, inserted_at="2026-10-05T12:00:00Z")
+        )
+        self.assertEqual(result["id"], 999)
+        self.assertEqual(len(session.calls), 1)
+        call = session.calls[0]
+        self.assertEqual(call["method"], "POST")
+        self.assertEqual(
+            call["url"],
+            "https://api.perfectdraft.com/api/perfectdraft_machine_kegs",
+        )
+        self.assertEqual(
+            call["json"],
+            {
+                "machine": "/api/perfectdraft_machines/42",
+                "keg": "/api/products/1775",
+                "insertedAt": "2026-10-05T12:00:00Z",
+            },
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
+
