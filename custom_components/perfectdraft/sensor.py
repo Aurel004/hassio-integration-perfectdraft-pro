@@ -58,6 +58,7 @@ class PerfectDraftSensorDescription(SensorEntityDescription):
     """Extended description with a value extractor."""
 
     value_fn: Callable[[dict], Any] = lambda d: None
+    attr_fn: Callable[[dict], dict[str, Any] | None] | None = None
 
 
 def _get_details(data: dict) -> dict:
@@ -174,11 +175,44 @@ def _get_firmware(data: dict) -> str | None:
 
 def _get_mode(data: dict) -> str | None:
     setting = data.get("setting") or {}
-    val = setting.get("mode")
-    if not isinstance(val, str):
-        return None
-    lower = val.strip().lower()
-    return lower if lower in MODE_OPTIONS else None
+    details = _get_details(data)
+    if setting.get("modeSwitchedOfByAppliance") is True:
+        return "standby"
+    for src in (setting, details):
+        val = src.get("mode")
+        if isinstance(val, str):
+            lower = val.strip().lower()
+            if lower in MODE_OPTIONS and lower != "standard":
+                return lower
+    if setting.get("boost") is True or details.get("boost") is True:
+        return "boost"
+    if (
+        setting.get("ecoModeEnabled") is True
+        or details.get("ecoModeEnabled") is True
+    ):
+        return "eco"
+    for src in (setting, details):
+        val = src.get("mode")
+        if isinstance(val, str):
+            lower = val.strip().lower()
+            if lower in MODE_OPTIONS:
+                return lower
+    return None
+
+
+def _get_mode_attributes(data: dict) -> dict[str, Any]:
+    setting = data.get("setting") or {}
+    return {
+        "raw_mode": setting.get("mode"),
+        "eco_mode_enabled": setting.get("ecoModeEnabled"),
+        "eco_temperature_setpoint": setting.get("ecoModeBeerTemperatureSetPoint"),
+        "eco_scheduler_enabled": setting.get("ecoModeSchedulerEnabled"),
+        "boost": setting.get("boost"),
+        "mode_switched_off_by_appliance": setting.get(
+            "modeSwitchedOfByAppliance"
+        ),
+        "setting_updated_at": setting.get("updatedAt"),
+    }
 
 
 def _get_keg_product_id(data: dict) -> int | None:
@@ -330,6 +364,7 @@ SENSOR_DESCRIPTIONS: tuple[PerfectDraftSensorDescription, ...] = (
         options=list(MODE_OPTIONS),
         icon="mdi:thermostat",
         value_fn=_get_mode,
+        attr_fn=_get_mode_attributes,
     ),
 )
 
@@ -376,6 +411,13 @@ class PerfectDraftSensor(
         if not data:
             return None
         return self.entity_description.value_fn(data)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        data = self.coordinator.data
+        if not data or self.entity_description.attr_fn is None:
+            return None
+        return self.entity_description.attr_fn(data)
 
 
 class PerfectDraftKegFreshnessSensor(
