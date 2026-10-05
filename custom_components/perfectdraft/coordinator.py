@@ -101,6 +101,23 @@ class PerfectDraftDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         details["_machine_id"] = machine_id
 
+        # Fetch full machine settings (includes ecoModeEnabled, ecoModeSchedulerEnabled,
+        # updatedAt, etc. which are omitted from the machine_pd_pro_read group).
+        setting_id = get_setting_id(details)
+        if setting_id:
+            try:
+                full_setting = await self.client.get_machine_settings(setting_id)
+                if isinstance(full_setting, dict):
+                    merged_setting = (
+                        dict(details["setting"])
+                        if isinstance(details.get("setting"), dict)
+                        else {}
+                    )
+                    merged_setting.update(full_setting)
+                    details["setting"] = merged_setting
+            except (PerfectDraftApiError, PerfectDraftConnectionError) as err:
+                _LOGGER.debug("Full machine setting lookup failed: %s", err)
+
         # The active keg lives behind a separate serialization group. Treat it
         # as best-effort so a failure here doesn't take the whole device down.
         try:

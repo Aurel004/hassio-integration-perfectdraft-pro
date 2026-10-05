@@ -188,7 +188,7 @@ class PerfectDraftApiClient:
         """Make an authenticated API request with automatic 401 retry."""
         url = f"{self._base}{path}"
         headers = dict(kwargs.pop("headers", {}))
-        headers.setdefault("Accept", "application/json")
+        headers.setdefault("Accept", "application/ld+json")
         headers["x-api-key"] = API_KEY
         if self._access_token:
             headers["x-access-token"] = self._access_token
@@ -232,6 +232,16 @@ class PerfectDraftApiClient:
         """GET /api/perfectdraft_machines/{machine_id} — full machine status."""
         return await self._request(
             "GET", f"/api/perfectdraft_machines/{machine_id}"
+        )
+
+    async def get_machine_settings(self, setting_id: str | int) -> dict[str, Any]:
+        """GET /api/perfectdraft_machine_settings/{setting_id} — full setting resource.
+
+        Includes fields omitted from the machine_pd_pro_read group such as
+        ``ecoModeEnabled``, ``ecoModeSchedulerEnabled``, and ``updatedAt``.
+        """
+        return await self._request(
+            "GET", f"/api/perfectdraft_machine_settings/{setting_id}"
         )
 
     async def get_machine_active_keg(self, machine_id: str) -> dict[str, Any]:
