@@ -9,7 +9,7 @@ from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, MODE_OPTIONS, keg_changed_signal
+from .const import DOMAIN, SELECTABLE_MODE_OPTIONS, keg_changed_signal
 from .coordinator import PerfectDraftDataUpdateCoordinator
 from .sensor import (
     _KEG_CATALOG,
@@ -67,7 +67,7 @@ class PerfectDraftModeSelect(
     _attr_has_entity_name = True
     _attr_translation_key = "mode"
     _attr_icon = "mdi:tune"
-    _attr_options = list(MODE_OPTIONS)
+    _attr_options = list(SELECTABLE_MODE_OPTIONS)
 
     def __init__(
         self,
@@ -80,16 +80,18 @@ class PerfectDraftModeSelect(
 
     @property
     def current_option(self) -> str | None:
-        """Return the current operating mode if it is in the allowed options."""
+        """Return the current operating mode if it is in the selectable options."""
         mode = _get_mode(self.coordinator.data or {})
-        if mode in MODE_OPTIONS:
+        if mode in SELECTABLE_MODE_OPTIONS:
             return mode
+        if mode == "cooling":
+            return "boost"
         return None
 
     async def async_select_option(self, option: str) -> None:
         """Change the machine operating mode."""
         normalized = option.strip().lower()
-        if normalized not in MODE_OPTIONS:
+        if normalized not in SELECTABLE_MODE_OPTIONS:
             raise HomeAssistantError(f"Unsupported mode: {option}")
         await self.coordinator.async_update_settings(
             mode=normalized,

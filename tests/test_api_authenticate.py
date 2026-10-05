@@ -229,6 +229,34 @@ class TestMachineControlApi(unittest.TestCase):
         with self.assertRaises(exceptions.PerfectDraftApiError):
             run(client.update_machine_settings(None, temperature=3))
 
+    def test_update_machine_settings_rejects_standby_mode(self):
+        client = api.PerfectDraftApiClient(FakeSession())
+        client.set_tokens(access_token="token-123")
+        with self.assertRaises(exceptions.PerfectDraftApiError):
+            run(client.update_machine_settings(42, mode="standby"))
+
+    def test_update_machine_settings_sanitizes_standby_in_current_setting(self):
+        updated = json.dumps({"id": 42, "temperature": 5, "mode": "standard"})
+        session = FakeSession(status=200, body=updated)
+        client = api.PerfectDraftApiClient(session)
+        client.set_tokens(access_token="token-123")
+
+        current_setting = {
+            "id": 42,
+            "temperature": 3,
+            "mode": "standby",
+            "boost": False,
+            "ecoModeEnabled": False,
+        }
+        run(
+            client.update_machine_settings(
+                42, current_setting=current_setting, temperature=5
+            )
+        )
+        call = session.calls[0]
+        self.assertEqual(call["json"]["mode"], "standard")
+        self.assertEqual(call["json"]["temperature"], 5)
+
     def test_set_active_keg_posts_iri_references(self):
         created = json.dumps(
             {

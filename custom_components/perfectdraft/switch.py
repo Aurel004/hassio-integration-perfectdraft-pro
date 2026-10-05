@@ -68,7 +68,7 @@ class PerfectDraftBoostSwitch(
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Disable boost mode."""
         current_mode = _get_mode(self.coordinator.data or {})
-        next_mode = "standard" if current_mode == "boost" else (current_mode or "standard")
+        next_mode = "eco" if current_mode == "eco" else "standard"
         await self.coordinator.async_update_settings(boost=False, mode=next_mode)
 
 
@@ -115,7 +115,7 @@ class PerfectDraftEcoModeSwitch(
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Disable eco mode."""
         current_mode = _get_mode(self.coordinator.data or {})
-        next_mode = "standard" if current_mode == "eco" else (current_mode or "standard")
+        next_mode = "boost" if current_mode == "boost" else "standard"
         await self.coordinator.async_update_settings(
             ecoModeEnabled=False,
             mode=next_mode,

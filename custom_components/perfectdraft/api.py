@@ -14,6 +14,7 @@ from .const import (
     COGNITO_CLIENT_ID,
     COGNITO_REGION,
     RECAPTCHA_DOMAIN,
+    SELECTABLE_MODE_OPTIONS,
 )
 from .exceptions import (
     AuthenticationError,
@@ -264,6 +265,9 @@ class PerfectDraftApiClient:
         if not sid or sid == "unknown":
             raise PerfectDraftApiError(400, "Invalid machine setting ID")
 
+        if "mode" in changes and changes["mode"] not in SELECTABLE_MODE_OPTIONS:
+            raise PerfectDraftApiError(400, f"Unsupported mode: {changes['mode']}")
+
         payload: dict[str, Any] = {}
         if isinstance(current_setting, dict):
             for key in _WRITABLE_SETTING_FIELDS:
@@ -272,6 +276,18 @@ class PerfectDraftApiClient:
         for key, val in changes.items():
             if key in _WRITABLE_SETTING_FIELDS:
                 payload[key] = val
+
+        # The PerfectDraft backend PHP match($mode) only handles selectable modes
+        # ("standard", "eco", "boost") and throws a 500 UnhandledMatchError if a
+        # read-only appliance state ("standby", "cooling") is sent back in PUT.
+        if "mode" in payload and payload["mode"] not in SELECTABLE_MODE_OPTIONS:
+            if payload.get("boost") is True:
+                payload["mode"] = "boost"
+            elif payload.get("ecoModeEnabled") is True:
+                payload["mode"] = "eco"
+            else:
+                payload["mode"] = "standard"
+
         return await self._request(
             "PUT",
             f"/api/perfectdraft_machine_settings/{sid}",
