@@ -244,9 +244,10 @@ class TestReconcileSettings(unittest.TestCase):
         self.assertEqual(sensor_mod._get_target_temperature({"setting": merged1, "details": {"settings": hw_std}}), 5.0)
 
         # Poll 2: User switches to Eco mode on mobile app (API updatedAt changes, ecoModeEnabled=True,
-        # while mode remains "standard" in API and hardware shadow hasn't updated yet)
+        # temperature=7, while mode remains "standard" in API and hardware shadow hasn't updated yet)
         api_eco = {
             **api_std,
+            "temperature": 7,
             "ecoModeEnabled": True,
             "updatedAt": "2026-10-06T18:05:00+00:00",
         }
@@ -255,6 +256,7 @@ class TestReconcileSettings(unittest.TestCase):
         )
         self.assertTrue(merged2["ecoModeEnabled"])
         self.assertEqual(merged2["mode"], "eco")
+        self.assertEqual(merged2["temperature"], 7)
         self.assertEqual(sensor_mod._get_mode({"setting": merged2, "details": {"settings": hw_std}}), "eco")
         self.assertEqual(sensor_mod._get_target_temperature({"setting": merged2, "details": {"settings": hw_std}}), 7.0)
 
@@ -265,10 +267,11 @@ class TestReconcileSettings(unittest.TestCase):
         )
         self.assertTrue(merged3["ecoModeEnabled"])
         self.assertEqual(merged3["mode"], "eco")
+        self.assertEqual(merged3["temperature"], 7)
         self.assertEqual(sensor_mod._get_mode({"setting": merged3, "details": {"settings": hw_std}}), "eco")
         self.assertEqual(sensor_mod._get_target_temperature({"setting": merged3, "details": {"settings": hw_std}}), 7.0)
 
-    def test_mobile_app_switches_to_planning_mode_and_sets_7c_target(self) -> None:
+    def test_mobile_app_switches_to_planning_mode_and_updates_real_target_temp(self) -> None:
         sync_state: dict[str, Any] = {}
         api_std = {
             "id": 1,
@@ -291,9 +294,10 @@ class TestReconcileSettings(unittest.TestCase):
             api_std, hw_std, prev_updated_at=None, sync_state=sync_state
         )
 
-        # User enables Planning (Cooling Scheduler) on mobile app
+        # User enables Planning (Cooling Scheduler) on mobile app; API reports temperature=7
         api_planning = {
             **api_std,
+            "temperature": 7,
             "ecoModeSchedulerEnabled": True,
             "updatedAt": "2026-10-06T18:10:00+00:00",
         }
@@ -302,6 +306,7 @@ class TestReconcileSettings(unittest.TestCase):
         )
         self.assertTrue(merged_plan["ecoModeSchedulerEnabled"])
         self.assertEqual(merged_plan["mode"], "cooling")
+        self.assertEqual(merged_plan["temperature"], 7)
         data_plan = {"setting": merged_plan, "details": {"settings": hw_std}}
         self.assertEqual(sensor_mod._get_mode(data_plan), "cooling")
         self.assertEqual(sensor_mod._get_target_temperature(data_plan), 7.0)
@@ -314,7 +319,7 @@ class TestReconcileSettings(unittest.TestCase):
         self.assertEqual(sensor_mod._get_mode(data_plan2), "cooling")
         self.assertEqual(sensor_mod._get_target_temperature(data_plan2), 7.0)
 
-    def test_target_temperature_uses_explicit_eco_setpoint_when_present(self) -> None:
+    def test_target_temperature_reports_exact_value_without_guessing_from_mode(self) -> None:
         data = {
             "setting": {
                 "_reconciled": True,
@@ -322,7 +327,6 @@ class TestReconcileSettings(unittest.TestCase):
                 "ecoModeEnabled": True,
                 "temperature": 3,
                 "temperatureMax": 7,
-                "ecoModeBeerTemperatureSetPoint": 8,
             },
             "details": {
                 "settings": {
@@ -333,7 +337,8 @@ class TestReconcileSettings(unittest.TestCase):
             },
         }
         self.assertEqual(sensor_mod._get_mode(data), "eco")
-        self.assertEqual(sensor_mod._get_target_temperature(data), 8.0)
+        self.assertEqual(sensor_mod._get_target_temperature(data), 3.0)
+
 
 
 

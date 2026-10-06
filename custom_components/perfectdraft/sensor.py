@@ -82,24 +82,10 @@ def _parse_temp(val: Any) -> float | None:
 def _get_target_temperature(data: dict) -> float | None:
     setting = data.get("setting") or {}
     details_settings = _get_details(data).get("settings")
-    if not isinstance(details_settings, dict):
-        details_settings = {}
-
-    base_temp = _parse_temp(setting.get("temperature"))
-    if base_temp is None:
-        base_temp = _parse_temp(details_settings.get("temperature"))
-
-    mode = _get_mode(data)
-    if mode in ("eco", "cooling"):
-        eco_temp = _parse_temp(setting.get("ecoModeBeerTemperatureSetPoint"))
-        if eco_temp is None:
-            eco_temp = _parse_temp(setting.get("temperatureMax"))
-        if eco_temp is None:
-            eco_temp = _parse_temp(details_settings.get("temperatureMax"))
-        if eco_temp is not None and (base_temp is None or base_temp < eco_temp):
-            return eco_temp
-
-    return base_temp
+    val = setting.get("temperature")
+    if val is None and isinstance(details_settings, dict):
+        val = details_settings.get("temperature")
+    return _parse_temp(val)
 
 
 def _get_time_to_target(data: dict) -> int | None:
