@@ -93,10 +93,6 @@
         }
       },
       "active_keg": { "name": "Fût installé" }
-    },
-    "switch": {
-      "boost": { "name": "Mode Boost" },
-      "eco_mode": { "name": "Mode Éco" }
     }
   },
   "options": {

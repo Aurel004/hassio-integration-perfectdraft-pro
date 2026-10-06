@@ -23,7 +23,7 @@ CONF_SCAN_INTERVAL = "scan_interval"
 MODE_OPTIONS = ("standard", "eco", "boost", "cooling", "standby")
 SELECTABLE_MODE_OPTIONS = ("standard", "eco", "boost")
 
-PLATFORMS = ["sensor", "button", "number", "select", "switch"]
+PLATFORMS = ["sensor", "button", "number", "select"]
 
 
 def keg_changed_signal(machine_id: str) -> str:
