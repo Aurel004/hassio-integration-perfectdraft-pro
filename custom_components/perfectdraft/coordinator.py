@@ -153,6 +153,13 @@ class PerfectDraftDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 merged.update(updated)
             merged.update(changes)
             self.data["setting"] = merged
+            details = self.data.get("details")
+            if isinstance(details, dict) and isinstance(details.get("settings"), dict):
+                details_settings = dict(details["settings"])
+                for key in ("temperature", "ecoModeEnabled", "ecoModeSchedulerEnabled"):
+                    if key in changes:
+                        details_settings[key] = changes[key]
+                details["settings"] = details_settings
             self.async_update_listeners()
 
         await self.async_request_refresh()
