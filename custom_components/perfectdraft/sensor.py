@@ -71,14 +71,32 @@ def _get_temperature(data: dict) -> float | None:
 
 def _get_target_temperature(data: dict) -> float | None:
     setting = data.get("setting") or {}
+    details_settings = _get_details(data).get("settings")
     val = setting.get("temperature")
-    if val is None:
+    if val is None and isinstance(details_settings, dict):
+        val = details_settings.get("temperature")
+    if val is None or isinstance(val, bool):
         return None
     try:
         num = float(val)
     except (TypeError, ValueError):
         return None
     return num if -20.0 <= num <= 50.0 else None
+
+
+def _get_time_to_target(data: dict) -> int | None:
+    val = _get_details(data).get("timeToReachTargetTemperature")
+    if val is None or isinstance(val, bool):
+        return None
+    try:
+        ms = float(val)
+    except (TypeError, ValueError):
+        return None
+    if ms < 0:
+        return None
+    if ms == 0:
+        return 0
+    return max(1, round(ms / 60000.0))
 
 
 def _get_volume_remaining(data: dict) -> float | None:
@@ -198,15 +216,12 @@ def _get_mode(data: dict) -> str | None:
         or details_settings.get("boost") is True
     ):
         return "boost"
-    if "ecoModeEnabled" in details_settings:
-        if details_settings.get("ecoModeEnabled") is True:
-            return "eco"
-        if details_settings.get("ecoModeEnabled") is False:
-            return "standard"
-    if setting.get("ecoModeEnabled") is True or details.get("ecoModeEnabled") is True:
+    if "ecoModeEnabled" in setting and setting.get("ecoModeEnabled") is not None:
+        return "eco" if setting.get("ecoModeEnabled") is True else "standard"
+    if "ecoModeEnabled" in details_settings and details_settings.get("ecoModeEnabled") is not None:
+        return "eco" if details_settings.get("ecoModeEnabled") is True else "standard"
+    if details.get("ecoModeEnabled") is True:
         return "eco"
-    if setting.get("ecoModeEnabled") is False:
-        return "standard"
     for src in (setting, details, details_settings):
         val = src.get("mode")
         if isinstance(val, str):
@@ -288,6 +303,16 @@ SENSOR_DESCRIPTIONS: tuple[PerfectDraftSensorDescription, ...] = (
         icon="mdi:thermostat",
         suggested_display_precision=0,
         value_fn=_get_target_temperature,
+    ),
+    PerfectDraftSensorDescription(
+        key="time_to_target",
+        translation_key="time_to_target",
+        device_class=SensorDeviceClass.DURATION,
+        native_unit_of_measurement=UnitOfTime.MINUTES,
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:timer-sand",
+        suggested_display_precision=0,
+        value_fn=_get_time_to_target,
     ),
     PerfectDraftSensorDescription(
         key="keg_remaining",

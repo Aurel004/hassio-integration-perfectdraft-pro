@@ -47,6 +47,63 @@ def get_setting_id(data: dict[str, Any] | None) -> str | None:
     return str(machine_id) if machine_id is not None else None
 
 
+_APPLIANCE_SETTING_KEYS = (
+    "temperature",
+    "temperatureMin",
+    "temperatureMax",
+    "temperatureUnit",
+    "ecoModeEnabled",
+    "ecoModeSchedulerEnabled",
+)
+
+
+def reconcile_settings(
+    api_setting: dict[str, Any] | None,
+    details_settings: dict[str, Any] | None,
+    prev_updated_at: str | None,
+) -> tuple[dict[str, Any], str | None]:
+    """Reconcile the cloud setting resource with the live appliance shadow.
+
+    When ``api_setting["updatedAt"]`` has not changed since the previous poll
+    (or on initial startup), ``details_settings`` from the machine's live
+    telemetry is authoritative for shared fields so changes made on the
+    appliance or mobile app are reflected and any unapplied setting reverts to
+    the real hardware state.
+    """
+    merged: dict[str, Any] = dict(api_setting) if isinstance(api_setting, dict) else {}
+    hw: dict[str, Any] = (
+        dict(details_settings) if isinstance(details_settings, dict) else {}
+    )
+
+    updated_at = merged.get("updatedAt")
+    updated_at_str = str(updated_at) if updated_at is not None else None
+    setting_just_updated = (
+        prev_updated_at is not None
+        and updated_at_str is not None
+        and updated_at_str != prev_updated_at
+    )
+
+    for key, val in hw.items():
+        if val is not None:
+            merged.setdefault(key, val)
+
+    if hw and not setting_just_updated:
+        for key in _APPLIANCE_SETTING_KEYS:
+            if key in hw and hw[key] is not None:
+                merged[key] = hw[key]
+
+    if merged.get("ecoModeEnabled") is False and merged.get("mode") == "eco":
+        merged["mode"] = "standard"
+    elif (
+        merged.get("ecoModeEnabled") is True
+        and merged.get("mode") in (None, "standard")
+        and merged.get("boost") is not True
+    ):
+        merged["mode"] = "eco"
+
+    return merged, updated_at_str
+
+
 class PerfectDraftDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Single coordinator that polls the PerfectDraft API for all entities."""
 
@@ -59,6 +116,7 @@ class PerfectDraftDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         config_entry: ConfigEntry,
     ) -> None:
         self.client = client
+        self._prev_setting_updated_at: str | None = None
         interval = config_entry.options.get(
             CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
         )
@@ -101,6 +159,12 @@ class PerfectDraftDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         details["_machine_id"] = machine_id
 
+        merged_setting: dict[str, Any] = (
+            dict(details["setting"])
+            if isinstance(details.get("setting"), dict)
+            else {}
+        )
+
         # Fetch full machine settings (includes ecoModeEnabled, ecoModeSchedulerEnabled,
         # updatedAt, etc. which are omitted from the machine_pd_pro_read group).
         setting_id = get_setting_id(details)
@@ -108,15 +172,22 @@ class PerfectDraftDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             try:
                 full_setting = await self.client.get_machine_settings(setting_id)
                 if isinstance(full_setting, dict):
-                    merged_setting = (
-                        dict(details["setting"])
-                        if isinstance(details.get("setting"), dict)
-                        else {}
-                    )
                     merged_setting.update(full_setting)
-                    details["setting"] = merged_setting
             except (PerfectDraftApiError, PerfectDraftConnectionError) as err:
                 _LOGGER.debug("Full machine setting lookup failed: %s", err)
+
+        details_payload = details.get("details")
+        details_settings = (
+            details_payload.get("settings")
+            if isinstance(details_payload, dict)
+            else None
+        )
+        reconciled_setting, self._prev_setting_updated_at = reconcile_settings(
+            merged_setting,
+            details_settings,
+            self._prev_setting_updated_at,
+        )
+        details["setting"] = reconciled_setting
 
         # The active keg lives behind a separate serialization group. Treat it
         # as best-effort so a failure here doesn't take the whole device down.
@@ -129,7 +200,7 @@ class PerfectDraftDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return details
 
     async def async_update_settings(self, **changes: Any) -> None:
-        """Update machine settings via the API and refresh local coordinator state."""
+        """Update machine settings via the API and refresh from the real server state."""
         data = self.data or {}
         setting_id = get_setting_id(data) or self.config_entry.data.get(CONF_MACHINE_ID)
         if not setting_id:
@@ -143,29 +214,21 @@ class PerfectDraftDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 setting_id, current_setting, **changes
             )
         except PerfectDraftError as err:
+            self.async_update_listeners()
             raise HomeAssistantError(
                 f"Failed to update PerfectDraft settings: {err}"
             ) from err
 
-        if isinstance(self.data, dict):
+        if isinstance(self.data, dict) and isinstance(updated, dict):
             merged = dict(current_setting)
-            if isinstance(updated, dict):
-                merged.update(updated)
-            merged.update(changes)
+            merged.update(updated)
             self.data["setting"] = merged
-            details = self.data.get("details")
-            if isinstance(details, dict) and isinstance(details.get("settings"), dict):
-                details_settings = dict(details["settings"])
-                for key in ("temperature", "ecoModeEnabled", "ecoModeSchedulerEnabled"):
-                    if key in changes:
-                        details_settings[key] = changes[key]
-                details["settings"] = details_settings
             self.async_update_listeners()
 
         await self.async_request_refresh()
 
     async def async_set_active_keg(self, product_id: int) -> None:
-        """Set the active keg via the API and refresh local coordinator state."""
+        """Set the active keg via the API and refresh from the real server state."""
         data = self.data or {}
         machine_id = data.get("_machine_id") or self.config_entry.data.get(
             CONF_MACHINE_ID
@@ -179,21 +242,19 @@ class PerfectDraftDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 machine_id, int(product_id), now
             )
         except PerfectDraftError as err:
+            self.async_update_listeners()
             raise HomeAssistantError(
                 f"Failed to set active PerfectDraft keg: {err}"
             ) from err
 
-        if isinstance(self.data, dict):
-            keg_active = {
-                "keg": f"/api/products/{int(product_id)}",
-                "insertedAt": now.isoformat(),
-            }
-            if isinstance(created, dict):
-                if created.get("keg"):
-                    keg_active["keg"] = created["keg"]
-                if created.get("insertedAt"):
-                    keg_active["insertedAt"] = created["insertedAt"]
-            self.data["kegActive"] = keg_active
-            self.async_update_listeners()
+        if isinstance(self.data, dict) and isinstance(created, dict):
+            keg_active = dict(self.data.get("kegActive") or {})
+            if created.get("keg"):
+                keg_active["keg"] = created["keg"]
+            if created.get("insertedAt"):
+                keg_active["insertedAt"] = created["insertedAt"]
+            if keg_active:
+                self.data["kegActive"] = keg_active
+                self.async_update_listeners()
 
         await self.async_request_refresh()

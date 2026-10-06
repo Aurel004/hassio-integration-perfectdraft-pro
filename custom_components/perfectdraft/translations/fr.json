@@ -41,6 +41,7 @@
     "sensor": {
       "temperature": { "name": "Température" },
       "target_temperature": { "name": "Température cible" },
+      "time_to_target": { "name": "Temps avant température cible" },
       "keg_remaining": { "name": "Niveau du fût" },
       "keg_volume": { "name": "Volume restant du fût" },
       "keg_product_id": { "name": "ID du fût" },
