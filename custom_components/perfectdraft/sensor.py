@@ -204,12 +204,20 @@ def _get_mode(data: dict) -> str | None:
         or details_settings.get("modeSwitchedOfByAppliance") is True
     ):
         return "standby"
+    scheduler = setting.get(
+        "ecoModeSchedulerEnabled",
+        details_settings.get("ecoModeSchedulerEnabled"),
+    )
+    if scheduler is True:
+        return "cooling"
     for src in (setting, details, details_settings):
         val = src.get("mode")
         if isinstance(val, str):
             lower = val.strip().lower()
-            if lower in ("standby", "cooling"):
-                return lower
+            if lower == "standby":
+                return "standby"
+            if lower == "cooling" and scheduler is not False:
+                return "cooling"
     if (
         setting.get("boost") is True
         or details.get("boost") is True

@@ -176,6 +176,47 @@ class TestReconcileSettings(unittest.TestCase):
         self.assertTrue(merged2["ecoModeEnabled"])
         self.assertEqual(merged2["mode"], "eco")
 
+    def test_scheduler_enabled_sets_cooling_mode_and_clears_when_disabled(self) -> None:
+        api_setting = {
+            "id": 1,
+            "mode": "standard",
+            "ecoModeEnabled": False,
+            "ecoModeSchedulerEnabled": False,
+            "updatedAt": "2026-10-06T17:34:08+00:00",
+        }
+        hw_scheduler_on = {
+            "ecoModeEnabled": False,
+            "ecoModeSchedulerEnabled": True,
+        }
+        merged, _ = coordinator_mod.reconcile_settings(
+            api_setting, hw_scheduler_on, prev_updated_at=None
+        )
+        self.assertEqual(merged["mode"], "cooling")
+        self.assertEqual(
+            sensor_mod._get_mode(
+                {"setting": merged, "details": {"settings": hw_scheduler_on}}
+            ),
+            "cooling",
+        )
+
+        # When scheduler is disabled on the appliance, mode reverts from cooling to standard
+        hw_scheduler_off = {
+            "ecoModeEnabled": False,
+            "ecoModeSchedulerEnabled": False,
+        }
+        merged_off, _ = coordinator_mod.reconcile_settings(
+            {"mode": "cooling", "updatedAt": "2026-10-06T17:34:08+00:00"},
+            hw_scheduler_off,
+            prev_updated_at=None,
+        )
+        self.assertEqual(merged_off["mode"], "standard")
+        self.assertEqual(
+            sensor_mod._get_mode(
+                {"setting": merged_off, "details": {"settings": hw_scheduler_off}}
+            ),
+            "standard",
+        )
+
 
 class TestTimeToTargetSensor(unittest.TestCase):
     def test_converts_milliseconds_to_minutes(self) -> None:

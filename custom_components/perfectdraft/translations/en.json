@@ -71,7 +71,7 @@
           "standard": "Standard",
           "eco": "Eco",
           "boost": "Boost",
-          "cooling": "Cooling",
+          "cooling": "Schedule",
           "standby": "Standby"
         }
       },
