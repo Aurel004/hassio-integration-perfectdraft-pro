@@ -72,8 +72,8 @@ _APPLIANCE_SETTING_KEYS = (
 )
 
 
-def parse_power_watts(raw_state: Any) -> float | None:
-    """Parse a Home Assistant sensor state into Watts, or None if unavailable."""
+def parse_power_watts(raw_state: Any, unit: str | None = None) -> float | None:
+    """Parse a Home Assistant sensor state into Watts, converting kW to W if needed."""
     if raw_state is None or isinstance(raw_state, bool):
         return None
     if isinstance(raw_state, str) and raw_state.strip().lower() in (
@@ -87,7 +87,11 @@ def parse_power_watts(raw_state: Any) -> float | None:
         val = float(raw_state)
     except (TypeError, ValueError):
         return None
-    return val if val >= 0.0 else None
+    if val < 0.0:
+        return None
+    if isinstance(unit, str) and unit.strip().lower() == "kw":
+        val *= 1000.0
+    return val
 
 
 def evaluate_power_standby(
@@ -126,10 +130,17 @@ def reconcile_settings(
     appliance or mobile app are reflected and any unapplied setting reverts to
     the real hardware state.
     """
-    merged: dict[str, Any] = dict(api_setting) if isinstance(api_setting, dict) else {}
+    raw_api: dict[str, Any] = (
+        dict(api_setting) if isinstance(api_setting, dict) else {}
+    )
+    merged: dict[str, Any] = dict(raw_api)
     hw: dict[str, Any] = (
         dict(details_settings) if isinstance(details_settings, dict) else {}
     )
+
+    api_mode = raw_api.get("mode")
+    api_eco = raw_api.get("ecoModeEnabled")
+    hw_eco = hw.get("ecoModeEnabled")
 
     updated_at = merged.get("updatedAt")
     updated_at_str = str(updated_at) if updated_at is not None else None
@@ -155,14 +166,31 @@ def reconcile_settings(
             merged.get("ecoModeSchedulerEnabled") is False
             and merged.get("mode") == "cooling"
         ):
-            merged["mode"] = (
-                "eco" if merged.get("ecoModeEnabled") is True else "standard"
-            )
-        if merged.get("ecoModeEnabled") is False and merged.get("mode") == "eco":
             merged["mode"] = "standard"
+
+        # If the API mode is explicitly "standard" while ecoModeEnabled was left
+        # True (e.g. mobile app switched mode to standard without clearing the
+        # ecoModeEnabled boolean), respect "standard". Only promote "standard"
+        # to "eco" if the API had ecoModeEnabled=False and the hardware shadow
+        # explicitly reports ecoModeEnabled=True.
+        if api_mode == "standard" and api_eco is True:
+            merged["mode"] = "standard"
+            merged["ecoModeEnabled"] = False
+        elif not setting_just_updated and hw_eco is False and merged.get("mode") == "eco":
+            merged["mode"] = "standard"
+            merged["ecoModeEnabled"] = False
         elif (
-            merged.get("ecoModeEnabled") is True
+            not setting_just_updated
+            and hw_eco is True
+            and api_eco is False
             and merged.get("mode") in (None, "standard")
+            and merged.get("boost") is not True
+        ):
+            merged["mode"] = "eco"
+            merged["ecoModeEnabled"] = True
+        elif (
+            merged.get("mode") is None
+            and merged.get("ecoModeEnabled") is True
             and merged.get("boost") is not True
         ):
             merged["mode"] = "eco"
@@ -275,7 +303,11 @@ class PerfectDraftDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if entity_id and getattr(self.hass, "states", None) is not None:
             state_obj = self.hass.states.get(entity_id)
             if state_obj is not None:
-                power_watts = parse_power_watts( getattr(state_obj, "state", None) )
+                attrs = getattr(state_obj, "attributes", None) or {}
+                power_watts = parse_power_watts(
+                    getattr(state_obj, "state", None),
+                    attrs.get("unit_of_measurement"),
+                )
                 if (
                     self._low_power_since is None
                     and power_watts is not None
@@ -373,6 +405,9 @@ class PerfectDraftDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     merged_setting.update(full_setting)
             except (PerfectDraftApiError, PerfectDraftConnectionError) as err:
                 _LOGGER.debug("Full machine setting lookup failed: %s", err)
+
+        details["_raw_api_mode"] = merged_setting.get("mode")
+        details["_raw_api_eco"] = merged_setting.get("ecoModeEnabled")
 
         details_payload = details.get("details")
         details_settings = (
