@@ -226,6 +226,18 @@ def _get_mode(data: dict) -> str | None:
         or details_settings.get("boost") is True
     ):
         return "boost"
+    raw_setting_mode = setting.get("mode")
+    if isinstance(raw_setting_mode, str):
+        lower_mode = raw_setting_mode.strip().lower()
+        if lower_mode == "standard":
+            return "standard"
+        if lower_mode == "eco":
+            if (
+                setting.get("ecoModeEnabled") is False
+                or details_settings.get("ecoModeEnabled") is False
+            ):
+                return "standard"
+            return "eco"
     if "ecoModeEnabled" in setting and setting.get("ecoModeEnabled") is not None:
         return "eco" if setting.get("ecoModeEnabled") is True else "standard"
     if "ecoModeEnabled" in details_settings and details_settings.get("ecoModeEnabled") is not None:
@@ -251,7 +263,11 @@ def _get_mode_attributes(data: dict) -> dict[str, Any]:
     )
     return {
         "raw_mode": setting.get("mode"),
+        "api_mode": data.get("_raw_api_mode", setting.get("mode")),
         "eco_mode_enabled": setting.get("ecoModeEnabled"),
+        "api_eco_mode_enabled": data.get(
+            "_raw_api_eco", setting.get("ecoModeEnabled")
+        ),
         "appliance_eco_mode_enabled": details_settings.get("ecoModeEnabled"),
         "eco_temperature_setpoint": setting.get("ecoModeBeerTemperatureSetPoint"),
         "eco_scheduler_enabled": setting.get(

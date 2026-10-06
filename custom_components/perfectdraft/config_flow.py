@@ -254,7 +254,10 @@ class PerfectDraftOptionsFlow(config_entries.OptionsFlow):
 
         if selector is not None:
             power_validator: Any = selector.EntitySelector(
-                selector.EntitySelectorConfig(domain="sensor")
+                selector.EntitySelectorConfig(
+                    domain="sensor",
+                    device_class="power",
+                )
             )
         else:
             power_validator = vol.Any(None, str)

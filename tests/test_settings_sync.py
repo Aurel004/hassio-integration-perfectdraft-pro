@@ -217,6 +217,31 @@ class TestReconcileSettings(unittest.TestCase):
             "standard",
         )
 
+    def test_standard_mode_not_overridden_by_leftover_eco_mode_enabled(self) -> None:
+        api_setting = {
+            "id": 1,
+            "mode": "standard",
+            "ecoModeEnabled": True,
+            "ecoModeSchedulerEnabled": False,
+            "updatedAt": "2026-10-06T18:00:00+00:00",
+        }
+        details_settings = {
+            "temperature": 3,
+            "ecoModeEnabled": True,
+            "ecoModeSchedulerEnabled": False,
+        }
+        merged, _ = coordinator_mod.reconcile_settings(
+            api_setting, details_settings, prev_updated_at=None
+        )
+        self.assertEqual(merged["mode"], "standard")
+        self.assertFalse(merged["ecoModeEnabled"])
+        self.assertEqual(
+            sensor_mod._get_mode(
+                {"setting": api_setting, "details": {"settings": details_settings}}
+            ),
+            "standard",
+        )
+
 
 class TestTimeToTargetSensor(unittest.TestCase):
     def test_converts_milliseconds_to_minutes(self) -> None:
@@ -243,6 +268,7 @@ class TestTimeToTargetSensor(unittest.TestCase):
 class TestStandbyPowerDetection(unittest.TestCase):
     def test_parse_power_watts(self) -> None:
         self.assertEqual(coordinator_mod.parse_power_watts("2.4"), 2.4)
+        self.assertEqual(coordinator_mod.parse_power_watts("0.002", "kW"), 2.0)
         self.assertEqual(coordinator_mod.parse_power_watts(0), 0.0)
         self.assertIsNone(coordinator_mod.parse_power_watts("unavailable"))
         self.assertIsNone(coordinator_mod.parse_power_watts("unknown"))
