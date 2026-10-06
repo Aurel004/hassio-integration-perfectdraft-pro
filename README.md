@@ -2,22 +2,38 @@
 
 A Home Assistant custom integration for the [PerfectDraft Pro](https://www.perfectdraft.com/) beer dispenser. Monitor your keg's temperature, remaining volume, pour history, and more — right from your HA dashboard.
 
-## Sensors
+## Sensors & Controls
+
+### Sensors
 
 | Sensor | Description | Unit |
 |--------|-------------|------|
 | Temperature | Current beer temperature | °C |
+| Target Temperature | Configured target beer temperature | °C |
+| Time to Target Temperature | Estimated cooling time remaining to reach target temperature | min |
 | Keg | Name of the tapped beer, resolved from a [bundled catalog](#the-keg-name-catalog) of 117 kegs | — |
 | Keg Product | Numeric product ID of the fitted keg | — |
 | Keg Remaining | Beer left in the keg | % |
+| Keg Remaining Volume | Beer left in the keg in liters | L |
 | Keg Freshness | Days remaining until 30-day freshness expires | days |
 | Connection | Machine connectivity status | — |
 | Door | Door open/closed state | — |
 | Pours | Number of pours since keg was loaded | — |
 | Last Pour | Volume of the most recent pour | mL |
+| Last Pour Duration | Duration of the most recent pour | s |
 | Keg Pressure | Air pressure in the keg; drops on each pour | kPa |
-| Mode | Current operating mode (standard, eco, etc.) | — |
+| Mode | Current operating mode (`standard`, `eco`, `boost`) | — |
+| Error Code | Diagnostic error code reported by the machine | — |
 | Firmware | Machine firmware version (disabled by default) | — |
+
+### Controls
+
+| Control | Platform | Description |
+|---------|----------|-------------|
+| Target Temperature | `number` | Adjust target beer temperature (`0 °C` – `12 °C`) |
+| Mode | `select` | Switch operating mode (`Standard`, `Eco`, `Boost`) |
+| Active Keg | `select` | Select the currently installed beer keg from the catalog |
+| Mark Keg Changed | `button` | Reset the 30-day freshness countdown and sync insertion date |
 
 ## Installation
 

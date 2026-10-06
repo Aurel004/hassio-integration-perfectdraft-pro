@@ -41,6 +41,7 @@
     "sensor": {
       "temperature": { "name": "Temperature" },
       "target_temperature": { "name": "Target Temperature" },
+      "time_to_target": { "name": "Time to Target Temperature" },
       "keg_remaining": { "name": "Keg Remaining" },
       "keg_volume": { "name": "Keg Remaining Volume" },
       "keg_product_id": { "name": "Keg Product" },
