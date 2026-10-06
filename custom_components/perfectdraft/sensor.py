@@ -176,22 +176,38 @@ def _get_firmware(data: dict) -> str | None:
 def _get_mode(data: dict) -> str | None:
     setting = data.get("setting") or {}
     details = _get_details(data)
-    if setting.get("modeSwitchedOfByAppliance") is True:
+    details_settings = (
+        details.get("settings")
+        if isinstance(details.get("settings"), dict)
+        else {}
+    )
+    if (
+        setting.get("modeSwitchedOfByAppliance") is True
+        or details_settings.get("modeSwitchedOfByAppliance") is True
+    ):
         return "standby"
-    for src in (setting, details):
+    for src in (setting, details, details_settings):
         val = src.get("mode")
         if isinstance(val, str):
             lower = val.strip().lower()
-            if lower in MODE_OPTIONS and lower != "standard":
+            if lower in ("standby", "cooling"):
                 return lower
-    if setting.get("boost") is True or details.get("boost") is True:
-        return "boost"
     if (
-        setting.get("ecoModeEnabled") is True
-        or details.get("ecoModeEnabled") is True
+        setting.get("boost") is True
+        or details.get("boost") is True
+        or details_settings.get("boost") is True
     ):
+        return "boost"
+    if "ecoModeEnabled" in details_settings:
+        if details_settings.get("ecoModeEnabled") is True:
+            return "eco"
+        if details_settings.get("ecoModeEnabled") is False:
+            return "standard"
+    if setting.get("ecoModeEnabled") is True or details.get("ecoModeEnabled") is True:
         return "eco"
-    for src in (setting, details):
+    if setting.get("ecoModeEnabled") is False:
+        return "standard"
+    for src in (setting, details, details_settings):
         val = src.get("mode")
         if isinstance(val, str):
             lower = val.strip().lower()
@@ -202,22 +218,26 @@ def _get_mode(data: dict) -> str | None:
 
 def _get_mode_attributes(data: dict) -> dict[str, Any]:
     setting = data.get("setting") or {}
-    details = {
-        k: v
-        for k, v in _get_details(data).items()
-        if k != "serialNumber"
-    }
+    details = _get_details(data)
+    details_settings = (
+        details.get("settings")
+        if isinstance(details.get("settings"), dict)
+        else {}
+    )
     return {
         "raw_mode": setting.get("mode"),
         "eco_mode_enabled": setting.get("ecoModeEnabled"),
+        "appliance_eco_mode_enabled": details_settings.get("ecoModeEnabled"),
         "eco_temperature_setpoint": setting.get("ecoModeBeerTemperatureSetPoint"),
-        "eco_scheduler_enabled": setting.get("ecoModeSchedulerEnabled"),
+        "eco_scheduler_enabled": setting.get(
+            "ecoModeSchedulerEnabled",
+            details_settings.get("ecoModeSchedulerEnabled"),
+        ),
         "boost": setting.get("boost"),
         "mode_switched_off_by_appliance": setting.get(
             "modeSwitchedOfByAppliance"
         ),
         "setting_updated_at": setting.get("updatedAt"),
-        "details": details,
     }
 
 
