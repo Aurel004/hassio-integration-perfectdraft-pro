@@ -121,14 +121,14 @@ def reconcile_settings(
     api_setting: dict[str, Any] | None,
     details_settings: dict[str, Any] | None,
     prev_updated_at: str | None,
+    sync_state: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], str | None]:
     """Reconcile the cloud setting resource with the live appliance shadow.
 
-    When ``api_setting["updatedAt"]`` has not changed since the previous poll
-    (or on initial startup), ``details_settings`` from the machine's live
-    telemetry is authoritative for shared fields so changes made on the
-    appliance or mobile app are reflected and any unapplied setting reverts to
-    the real hardware state.
+    Tracks which source (`api_setting` vs `details_settings`) changed most
+    recently so stale telemetry in `details_settings` never reverts a newer
+    setting from the mobile app or Home Assistant, while changes made directly
+    on the appliance shadow (`details_settings`) are immediately reflected.
     """
     raw_api: dict[str, Any] = (
         dict(api_setting) if isinstance(api_setting, dict) else {}
@@ -138,63 +138,134 @@ def reconcile_settings(
         dict(details_settings) if isinstance(details_settings, dict) else {}
     )
 
-    api_mode = raw_api.get("mode")
-    api_eco = raw_api.get("ecoModeEnabled")
-    hw_eco = hw.get("ecoModeEnabled")
-
     updated_at = merged.get("updatedAt")
     updated_at_str = str(updated_at) if updated_at is not None else None
-    setting_just_updated = (
+    api_changed = (
         prev_updated_at is not None
         and updated_at_str is not None
         and updated_at_str != prev_updated_at
     )
 
+    stale_hw: dict[str, Any] = {}
+    prev_api: dict[str, Any] | None = None
+    prev_hw: dict[str, Any] | None = None
+    if isinstance(sync_state, dict):
+        prev_api = sync_state.get("prev_api")
+        prev_hw = sync_state.get("prev_hw")
+        stale_hw = sync_state.setdefault("stale_hw", {})
+        if not api_changed and isinstance(prev_api, dict):
+            for key in (
+                "mode",
+                "boost",
+                "ecoModeEnabled",
+                "ecoModeSchedulerEnabled",
+                "temperature",
+                "ecoModeBeerTemperatureSetPoint",
+            ):
+                if raw_api.get(key) != prev_api.get(key):
+                    api_changed = True
+                    break
+
+    if api_changed:
+        if (
+            isinstance(prev_api, dict)
+            and prev_api.get("mode") in ("eco", "cooling", "boost")
+            and raw_api.get("mode") == "standard"
+            and raw_api.get("ecoModeEnabled") is True
+        ):
+            merged["ecoModeEnabled"] = False
+
+        if (
+            merged.get("mode") == "cooling"
+            and merged.get("ecoModeSchedulerEnabled") is None
+        ):
+            merged["ecoModeSchedulerEnabled"] = True
+
+        for key in _APPLIANCE_SETTING_KEYS:
+            if key in hw and hw[key] is not None:
+                hw_just_changed = (
+                    isinstance(prev_hw, dict)
+                    and hw.get(key) != prev_hw.get(key)
+                )
+                if (
+                    not hw_just_changed
+                    and key in merged
+                    and merged[key] is not None
+                    and hw[key] != merged[key]
+                ):
+                    stale_hw[key] = hw[key]
+                elif hw_just_changed:
+                    stale_hw.pop(key, None)
+                    merged[key] = hw[key]
+
+        if (
+            merged.get("mode") == "cooling"
+            or merged.get("ecoModeSchedulerEnabled") is True
+        ):
+            if hw.get("ecoModeSchedulerEnabled") is False and not (
+                isinstance(prev_hw, dict)
+                and prev_hw.get("ecoModeSchedulerEnabled") is True
+            ):
+                stale_hw["ecoModeSchedulerEnabled"] = False
+
+        if (
+            merged.get("mode") == "eco"
+            or merged.get("ecoModeEnabled") is True
+        ):
+            if hw.get("ecoModeEnabled") is False and not (
+                isinstance(prev_hw, dict)
+                and prev_hw.get("ecoModeEnabled") is True
+            ):
+                stale_hw["ecoModeEnabled"] = False
+    else:
+        for key in list(stale_hw.keys()):
+            if hw.get(key) != stale_hw[key] or (
+                key in raw_api and hw.get(key) == raw_api.get(key)
+            ):
+                stale_hw.pop(key, None)
+
+    if isinstance(sync_state, dict):
+        sync_state["prev_api"] = dict(raw_api)
+        sync_state["prev_hw"] = dict(hw)
+
     for key, val in hw.items():
         if val is not None:
             merged.setdefault(key, val)
 
-    if hw and not setting_just_updated:
+    if hw and not api_changed:
         for key in _APPLIANCE_SETTING_KEYS:
-            if key in hw and hw[key] is not None:
+            if key in hw and hw[key] is not None and key not in stale_hw:
                 merged[key] = hw[key]
 
-    if merged.get("ecoModeSchedulerEnabled") is True:
+    if merged.get("ecoModeSchedulerEnabled") is True or (
+        merged.get("mode") == "cooling"
+        and "ecoModeSchedulerEnabled" in stale_hw
+    ):
+        merged["ecoModeSchedulerEnabled"] = True
         merged["mode"] = "cooling"
     else:
         if (
             merged.get("ecoModeSchedulerEnabled") is False
             and merged.get("mode") == "cooling"
         ):
-            merged["mode"] = "standard"
-
-        # If the API mode is explicitly "standard" while ecoModeEnabled was left
-        # True (e.g. mobile app switched mode to standard without clearing the
-        # ecoModeEnabled boolean), respect "standard". Only promote "standard"
-        # to "eco" if the API had ecoModeEnabled=False and the hardware shadow
-        # explicitly reports ecoModeEnabled=True.
-        if api_mode == "standard" and api_eco is True:
-            merged["mode"] = "standard"
-            merged["ecoModeEnabled"] = False
-        elif not setting_just_updated and hw_eco is False and merged.get("mode") == "eco":
-            merged["mode"] = "standard"
-            merged["ecoModeEnabled"] = False
+            merged["mode"] = (
+                "eco" if merged.get("ecoModeEnabled") is True else "standard"
+            )
+        if merged.get("boost") is True:
+            merged["mode"] = "boost"
         elif (
-            not setting_just_updated
-            and hw_eco is True
-            and api_eco is False
+            merged.get("ecoModeEnabled") is False
+            and merged.get("mode") == "eco"
+        ):
+            merged["mode"] = "standard"
+        elif (
+            merged.get("ecoModeEnabled") is True
             and merged.get("mode") in (None, "standard")
             and merged.get("boost") is not True
         ):
             merged["mode"] = "eco"
-            merged["ecoModeEnabled"] = True
-        elif (
-            merged.get("mode") is None
-            and merged.get("ecoModeEnabled") is True
-            and merged.get("boost") is not True
-        ):
-            merged["mode"] = "eco"
 
+    merged["_reconciled"] = True
     return merged, updated_at_str
 
 
@@ -211,6 +282,7 @@ class PerfectDraftDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     ) -> None:
         self.client = client
         self._prev_setting_updated_at: str | None = None
+        self._setting_sync_state: dict[str, Any] = {}
         self._unsub_power_listener: Callable[[], None] | None = None
         self._unsub_standby_timer: Callable[[], None] | None = None
         self._tracked_power_entity_id: str | None = None
@@ -408,6 +480,10 @@ class PerfectDraftDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         details["_raw_api_mode"] = merged_setting.get("mode")
         details["_raw_api_eco"] = merged_setting.get("ecoModeEnabled")
+        details["_raw_api_scheduler"] = merged_setting.get(
+            "ecoModeSchedulerEnabled"
+        )
+        details["_raw_api_temperature"] = merged_setting.get("temperature")
 
         details_payload = details.get("details")
         details_settings = (
@@ -419,6 +495,7 @@ class PerfectDraftDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             merged_setting,
             details_settings,
             self._prev_setting_updated_at,
+            self._setting_sync_state,
         )
         details["setting"] = reconciled_setting
 
