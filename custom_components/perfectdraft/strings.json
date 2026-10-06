@@ -101,7 +101,10 @@
       "init": {
         "title": "PerfectDraft Options",
         "data": {
-          "scan_interval": "Polling interval (seconds)"
+          "scan_interval": "Polling interval (seconds)",
+          "power_entity_id": "Smart plug power sensor (optional)",
+          "standby_power_threshold": "Standby power threshold (W)",
+          "standby_delay": "Standby detection delay (seconds)"
         }
       }
     }

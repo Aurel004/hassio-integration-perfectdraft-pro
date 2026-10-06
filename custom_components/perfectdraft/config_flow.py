@@ -15,9 +15,14 @@ from .const import (
     CONF_ACCESS_TOKEN,
     CONF_ID_TOKEN,
     CONF_MACHINE_ID,
+    CONF_POWER_ENTITY_ID,
     CONF_REFRESH_TOKEN,
     CONF_SCAN_INTERVAL,
+    CONF_STANDBY_DELAY,
+    CONF_STANDBY_POWER_THRESHOLD,
     DEFAULT_SCAN_INTERVAL,
+    DEFAULT_STANDBY_DELAY,
+    DEFAULT_STANDBY_POWER_THRESHOLD,
     DOMAIN,
     MIN_SCAN_INTERVAL,
 )
@@ -26,6 +31,11 @@ from .exceptions import (
     PerfectDraftApiError,
     PerfectDraftConnectionError,
 )
+
+try:
+    from homeassistant.helpers import selector
+except ImportError:  # pragma: no cover - fallback for lightweight test stubs
+    selector = None  # type: ignore[assignment]
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -195,7 +205,7 @@ class PerfectDraftConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 class PerfectDraftOptionsFlow(config_entries.OptionsFlow):
-    """Handle options for PerfectDraft (polling interval)."""
+    """Handle options for PerfectDraft (polling interval and standby power detection)."""
 
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
         self._config_entry = config_entry
@@ -204,22 +214,68 @@ class PerfectDraftOptionsFlow(config_entries.OptionsFlow):
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.ConfigFlowResult:
         if user_input is not None:
-            interval = max(user_input[CONF_SCAN_INTERVAL], MIN_SCAN_INTERVAL)
+            interval = max(int(user_input[CONF_SCAN_INTERVAL]), MIN_SCAN_INTERVAL)
+            power_entity = (user_input.get(CONF_POWER_ENTITY_ID) or "").strip() or None
+            threshold = max(
+                0.0,
+                float(
+                    user_input.get(
+                        CONF_STANDBY_POWER_THRESHOLD,
+                        DEFAULT_STANDBY_POWER_THRESHOLD,
+                    )
+                ),
+            )
+            delay = max(
+                0,
+                int(
+                    user_input.get(
+                        CONF_STANDBY_DELAY,
+                        DEFAULT_STANDBY_DELAY,
+                    )
+                ),
+            )
             return self.async_create_entry(
-                title="", data={CONF_SCAN_INTERVAL: interval}
+                title="",
+                data={
+                    CONF_SCAN_INTERVAL: interval,
+                    CONF_POWER_ENTITY_ID: power_entity,
+                    CONF_STANDBY_POWER_THRESHOLD: threshold,
+                    CONF_STANDBY_DELAY: delay,
+                },
             )
 
-        current = self._config_entry.options.get(
-            CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
+        options = self._config_entry.options
+        current_interval = options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
+        current_power_entity = options.get(CONF_POWER_ENTITY_ID)
+        current_threshold = options.get(
+            CONF_STANDBY_POWER_THRESHOLD, DEFAULT_STANDBY_POWER_THRESHOLD
         )
+        current_delay = options.get(CONF_STANDBY_DELAY, DEFAULT_STANDBY_DELAY)
+
+        if selector is not None:
+            power_validator: Any = selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor")
+            )
+        else:
+            power_validator = vol.Any(None, str)
 
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema(
                 {
-                    vol.Required(CONF_SCAN_INTERVAL, default=current): vol.All(
-                        int, vol.Range(min=MIN_SCAN_INTERVAL)
-                    ),
+                    vol.Required(
+                        CONF_SCAN_INTERVAL, default=current_interval
+                    ): vol.All(vol.Coerce(int), vol.Range(min=MIN_SCAN_INTERVAL)),
+                    vol.Optional(
+                        CONF_POWER_ENTITY_ID,
+                        description={"suggested_value": current_power_entity},
+                    ): vol.Any(None, power_validator),
+                    vol.Required(
+                        CONF_STANDBY_POWER_THRESHOLD, default=current_threshold
+                    ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=100.0)),
+                    vol.Required(
+                        CONF_STANDBY_DELAY, default=current_delay
+                    ): vol.All(vol.Coerce(int), vol.Range(min=0, max=3600)),
                 }
             ),
         )

@@ -101,7 +101,10 @@
       "init": {
         "title": "Options PerfectDraft",
         "data": {
-          "scan_interval": "Intervalle d'actualisation (secondes)"
+          "scan_interval": "Intervalle d'actualisation (secondes)",
+          "power_entity_id": "Capteur de puissance de la prise connectée (optionnel)",
+          "standby_power_threshold": "Seuil de puissance en veille (W)",
+          "standby_delay": "Délai avant passage en veille (secondes)"
         }
       }
     }

@@ -19,6 +19,12 @@ CONF_ID_TOKEN = "id_token"
 CONF_USER_ID = "user_id"
 CONF_MACHINE_ID = "machine_id"
 CONF_SCAN_INTERVAL = "scan_interval"
+CONF_POWER_ENTITY_ID = "power_entity_id"
+CONF_STANDBY_POWER_THRESHOLD = "standby_power_threshold"
+CONF_STANDBY_DELAY = "standby_delay"
+
+DEFAULT_STANDBY_POWER_THRESHOLD = 5.0  # Watts
+DEFAULT_STANDBY_DELAY = 120  # seconds (2 minutes)
 
 MODE_OPTIONS = ("standard", "eco", "boost", "cooling", "standby")
 SELECTABLE_MODE_OPTIONS = ("standard", "eco", "boost")
