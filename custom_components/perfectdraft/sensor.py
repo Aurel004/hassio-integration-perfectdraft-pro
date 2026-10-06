@@ -202,6 +202,11 @@ def _get_mode(data: dict) -> str | None:
 
 def _get_mode_attributes(data: dict) -> dict[str, Any]:
     setting = data.get("setting") or {}
+    details = {
+        k: v
+        for k, v in _get_details(data).items()
+        if k != "serialNumber"
+    }
     return {
         "raw_mode": setting.get("mode"),
         "eco_mode_enabled": setting.get("ecoModeEnabled"),
@@ -212,6 +217,7 @@ def _get_mode_attributes(data: dict) -> dict[str, Any]:
             "modeSwitchedOfByAppliance"
         ),
         "setting_updated_at": setting.get("updatedAt"),
+        "details": details,
     }
 
 
