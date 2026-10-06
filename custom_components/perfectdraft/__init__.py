@@ -7,6 +7,7 @@ import logging
 import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import PerfectDraftApiClient
@@ -36,6 +37,13 @@ SERVICE_SCHEMA = vol.Schema(
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up PerfectDraft from a config entry."""
+    ent_reg = er.async_get(hass)
+    for reg_entry in list(
+        er.async_entries_for_config_entry(ent_reg, entry.entry_id)
+    ):
+        if reg_entry.domain == "switch":
+            ent_reg.async_remove(reg_entry.entity_id)
+
     session = async_get_clientsession(hass)
     client = PerfectDraftApiClient(session)
 
