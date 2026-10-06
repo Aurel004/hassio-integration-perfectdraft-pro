@@ -69,12 +69,7 @@ def _get_temperature(data: dict) -> float | None:
     return beer_temperature(_get_details(data))
 
 
-def _get_target_temperature(data: dict) -> float | None:
-    setting = data.get("setting") or {}
-    details_settings = _get_details(data).get("settings")
-    val = setting.get("temperature")
-    if val is None and isinstance(details_settings, dict):
-        val = details_settings.get("temperature")
+def _parse_temp(val: Any) -> float | None:
     if val is None or isinstance(val, bool):
         return None
     try:
@@ -82,6 +77,29 @@ def _get_target_temperature(data: dict) -> float | None:
     except (TypeError, ValueError):
         return None
     return num if -20.0 <= num <= 50.0 else None
+
+
+def _get_target_temperature(data: dict) -> float | None:
+    setting = data.get("setting") or {}
+    details_settings = _get_details(data).get("settings")
+    if not isinstance(details_settings, dict):
+        details_settings = {}
+
+    base_temp = _parse_temp(setting.get("temperature"))
+    if base_temp is None:
+        base_temp = _parse_temp(details_settings.get("temperature"))
+
+    mode = _get_mode(data)
+    if mode in ("eco", "cooling"):
+        eco_temp = _parse_temp(setting.get("ecoModeBeerTemperatureSetPoint"))
+        if eco_temp is None:
+            eco_temp = _parse_temp(setting.get("temperatureMax"))
+        if eco_temp is None:
+            eco_temp = _parse_temp(details_settings.get("temperatureMax"))
+        if eco_temp is not None and (base_temp is None or base_temp < eco_temp):
+            return eco_temp
+
+    return base_temp
 
 
 def _get_time_to_target(data: dict) -> int | None:
@@ -206,10 +224,12 @@ def _get_mode(data: dict) -> str | None:
         or details_settings.get("modeSwitchedOfByAppliance") is True
     ):
         return "standby"
-    scheduler = setting.get(
-        "ecoModeSchedulerEnabled",
-        details_settings.get("ecoModeSchedulerEnabled"),
-    )
+    reconciled = setting.get("_reconciled") is True
+    scheduler = setting.get("ecoModeSchedulerEnabled")
+    if scheduler is None or (
+        not reconciled and details_settings.get("ecoModeSchedulerEnabled") is True
+    ):
+        scheduler = details_settings.get("ecoModeSchedulerEnabled", scheduler)
     if scheduler is True:
         return "cooling"
     for src in (setting, details, details_settings):
@@ -226,18 +246,8 @@ def _get_mode(data: dict) -> str | None:
         or details_settings.get("boost") is True
     ):
         return "boost"
-    raw_setting_mode = setting.get("mode")
-    if isinstance(raw_setting_mode, str):
-        lower_mode = raw_setting_mode.strip().lower()
-        if lower_mode == "standard":
-            return "standard"
-        if lower_mode == "eco":
-            if (
-                setting.get("ecoModeEnabled") is False
-                or details_settings.get("ecoModeEnabled") is False
-            ):
-                return "standard"
-            return "eco"
+    if not reconciled and "ecoModeEnabled" in details_settings and details_settings.get("ecoModeEnabled") is not None:
+        return "eco" if details_settings.get("ecoModeEnabled") is True else "standard"
     if "ecoModeEnabled" in setting and setting.get("ecoModeEnabled") is not None:
         return "eco" if setting.get("ecoModeEnabled") is True else "standard"
     if "ecoModeEnabled" in details_settings and details_settings.get("ecoModeEnabled") is not None:
@@ -270,9 +280,20 @@ def _get_mode_attributes(data: dict) -> dict[str, Any]:
         ),
         "appliance_eco_mode_enabled": details_settings.get("ecoModeEnabled"),
         "eco_temperature_setpoint": setting.get("ecoModeBeerTemperatureSetPoint"),
+        "standard_temperature_setpoint": setting.get("temperature"),
+        "api_temperature": data.get(
+            "_raw_api_temperature", setting.get("temperature")
+        ),
+        "appliance_temperature": details_settings.get("temperature"),
         "eco_scheduler_enabled": setting.get(
             "ecoModeSchedulerEnabled",
             details_settings.get("ecoModeSchedulerEnabled"),
+        ),
+        "api_scheduler_enabled": data.get(
+            "_raw_api_scheduler", setting.get("ecoModeSchedulerEnabled")
+        ),
+        "appliance_scheduler_enabled": details_settings.get(
+            "ecoModeSchedulerEnabled"
         ),
         "boost": setting.get("boost"),
         "mode_switched_off_by_appliance": setting.get(

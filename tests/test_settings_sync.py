@@ -217,30 +217,124 @@ class TestReconcileSettings(unittest.TestCase):
             "standard",
         )
 
-    def test_standard_mode_not_overridden_by_leftover_eco_mode_enabled(self) -> None:
-        api_setting = {
+    def test_mobile_app_switches_to_eco_mode_with_stale_hardware_shadow(self) -> None:
+        sync_state: dict[str, Any] = {}
+        # Poll 1: Initially in standard mode (5°C)
+        api_std = {
             "id": 1,
+            "temperature": 5,
+            "temperatureMin": 0,
+            "temperatureMax": 7,
             "mode": "standard",
-            "ecoModeEnabled": True,
+            "ecoModeEnabled": False,
             "ecoModeSchedulerEnabled": False,
             "updatedAt": "2026-10-06T18:00:00+00:00",
         }
-        details_settings = {
-            "temperature": 3,
-            "ecoModeEnabled": True,
+        hw_std = {
+            "temperature": 5,
+            "temperatureMin": 3,
+            "temperatureMax": 7,
+            "ecoModeEnabled": False,
             "ecoModeSchedulerEnabled": False,
         }
-        merged, _ = coordinator_mod.reconcile_settings(
-            api_setting, details_settings, prev_updated_at=None
+        merged1, updated1 = coordinator_mod.reconcile_settings(
+            api_std, hw_std, prev_updated_at=None, sync_state=sync_state
         )
-        self.assertEqual(merged["mode"], "standard")
-        self.assertFalse(merged["ecoModeEnabled"])
-        self.assertEqual(
-            sensor_mod._get_mode(
-                {"setting": api_setting, "details": {"settings": details_settings}}
-            ),
-            "standard",
+        self.assertEqual(sensor_mod._get_mode({"setting": merged1, "details": {"settings": hw_std}}), "standard")
+        self.assertEqual(sensor_mod._get_target_temperature({"setting": merged1, "details": {"settings": hw_std}}), 5.0)
+
+        # Poll 2: User switches to Eco mode on mobile app (API updatedAt changes, ecoModeEnabled=True,
+        # while mode remains "standard" in API and hardware shadow hasn't updated yet)
+        api_eco = {
+            **api_std,
+            "ecoModeEnabled": True,
+            "updatedAt": "2026-10-06T18:05:00+00:00",
+        }
+        merged2, updated2 = coordinator_mod.reconcile_settings(
+            api_eco, hw_std, prev_updated_at=updated1, sync_state=sync_state
         )
+        self.assertTrue(merged2["ecoModeEnabled"])
+        self.assertEqual(merged2["mode"], "eco")
+        self.assertEqual(sensor_mod._get_mode({"setting": merged2, "details": {"settings": hw_std}}), "eco")
+        self.assertEqual(sensor_mod._get_target_temperature({"setting": merged2, "details": {"settings": hw_std}}), 7.0)
+
+        # Poll 3 (2 minutes later): updatedAt is still 18:05:00, and hardware shadow is STILL stale (hw_std).
+        # Must NOT revert back to standard mode or 5°C!
+        merged3, _ = coordinator_mod.reconcile_settings(
+            api_eco, hw_std, prev_updated_at=updated2, sync_state=sync_state
+        )
+        self.assertTrue(merged3["ecoModeEnabled"])
+        self.assertEqual(merged3["mode"], "eco")
+        self.assertEqual(sensor_mod._get_mode({"setting": merged3, "details": {"settings": hw_std}}), "eco")
+        self.assertEqual(sensor_mod._get_target_temperature({"setting": merged3, "details": {"settings": hw_std}}), 7.0)
+
+    def test_mobile_app_switches_to_planning_mode_and_sets_7c_target(self) -> None:
+        sync_state: dict[str, Any] = {}
+        api_std = {
+            "id": 1,
+            "temperature": 5,
+            "temperatureMin": 0,
+            "temperatureMax": 7,
+            "mode": "standard",
+            "ecoModeEnabled": False,
+            "ecoModeSchedulerEnabled": False,
+            "updatedAt": "2026-10-06T18:00:00+00:00",
+        }
+        hw_std = {
+            "temperature": 5,
+            "temperatureMin": 3,
+            "temperatureMax": 7,
+            "ecoModeEnabled": False,
+            "ecoModeSchedulerEnabled": False,
+        }
+        _, updated1 = coordinator_mod.reconcile_settings(
+            api_std, hw_std, prev_updated_at=None, sync_state=sync_state
+        )
+
+        # User enables Planning (Cooling Scheduler) on mobile app
+        api_planning = {
+            **api_std,
+            "ecoModeSchedulerEnabled": True,
+            "updatedAt": "2026-10-06T18:10:00+00:00",
+        }
+        merged_plan, updated2 = coordinator_mod.reconcile_settings(
+            api_planning, hw_std, prev_updated_at=updated1, sync_state=sync_state
+        )
+        self.assertTrue(merged_plan["ecoModeSchedulerEnabled"])
+        self.assertEqual(merged_plan["mode"], "cooling")
+        data_plan = {"setting": merged_plan, "details": {"settings": hw_std}}
+        self.assertEqual(sensor_mod._get_mode(data_plan), "cooling")
+        self.assertEqual(sensor_mod._get_target_temperature(data_plan), 7.0)
+
+        # Subsequent poll with unchanged updatedAt and still-stale hw_std preserves cooling & 7.0°C
+        merged_plan2, _ = coordinator_mod.reconcile_settings(
+            api_planning, hw_std, prev_updated_at=updated2, sync_state=sync_state
+        )
+        data_plan2 = {"setting": merged_plan2, "details": {"settings": hw_std}}
+        self.assertEqual(sensor_mod._get_mode(data_plan2), "cooling")
+        self.assertEqual(sensor_mod._get_target_temperature(data_plan2), 7.0)
+
+    def test_target_temperature_uses_explicit_eco_setpoint_when_present(self) -> None:
+        data = {
+            "setting": {
+                "_reconciled": True,
+                "mode": "eco",
+                "ecoModeEnabled": True,
+                "temperature": 3,
+                "temperatureMax": 7,
+                "ecoModeBeerTemperatureSetPoint": 8,
+            },
+            "details": {
+                "settings": {
+                    "temperature": 3,
+                    "temperatureMax": 7,
+                    "ecoModeEnabled": True,
+                }
+            },
+        }
+        self.assertEqual(sensor_mod._get_mode(data), "eco")
+        self.assertEqual(sensor_mod._get_target_temperature(data), 8.0)
+
 
 
 class TestTimeToTargetSensor(unittest.TestCase):
