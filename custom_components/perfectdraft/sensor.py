@@ -192,6 +192,8 @@ def _get_firmware(data: dict) -> str | None:
 
 
 def _get_mode(data: dict) -> str | None:
+    if data.get("_power_standby") is True:
+        return "standby"
     setting = data.get("setting") or {}
     details = _get_details(data)
     details_settings = (
@@ -260,6 +262,9 @@ def _get_mode_attributes(data: dict) -> dict[str, Any]:
         "mode_switched_off_by_appliance": setting.get(
             "modeSwitchedOfByAppliance"
         ),
+        "power_entity_id": data.get("_power_entity_id"),
+        "power_watts": data.get("_power_watts"),
+        "standby_detected_by_power": data.get("_power_standby"),
         "setting_updated_at": setting.get("updatedAt"),
     }
 

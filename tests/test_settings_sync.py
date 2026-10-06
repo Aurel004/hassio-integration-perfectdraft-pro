@@ -240,5 +240,85 @@ class TestTimeToTargetSensor(unittest.TestCase):
         )
 
 
+class TestStandbyPowerDetection(unittest.TestCase):
+    def test_parse_power_watts(self) -> None:
+        self.assertEqual(coordinator_mod.parse_power_watts("2.4"), 2.4)
+        self.assertEqual(coordinator_mod.parse_power_watts(0), 0.0)
+        self.assertIsNone(coordinator_mod.parse_power_watts("unavailable"))
+        self.assertIsNone(coordinator_mod.parse_power_watts("unknown"))
+        self.assertIsNone(coordinator_mod.parse_power_watts(-1))
+
+    def test_delay_on_and_hysteresis_below_threshold(self) -> None:
+        from datetime import datetime, timedelta, timezone
+
+        t0 = datetime(2026, 10, 6, 20, 0, 0, tzinfo=timezone.utc)
+        # First reading at 1.8 W <= 5.0 W with 120s delay -> not standby yet, 120s remaining
+        is_standby, since, remaining = coordinator_mod.evaluate_power_standby(
+            power_watts=1.8,
+            threshold=5.0,
+            delay_seconds=120,
+            low_power_since=None,
+            now=t0,
+        )
+        self.assertFalse(is_standby)
+        self.assertEqual(since, t0)
+        self.assertEqual(remaining, 120.0)
+
+        # Minor fluctuation at t0 + 30s (1.9 W <= 5.0 W) keeps original `since`
+        t1 = t0 + timedelta(seconds=30)
+        is_standby, since2, remaining2 = coordinator_mod.evaluate_power_standby(
+            power_watts=1.9,
+            threshold=5.0,
+            delay_seconds=120,
+            low_power_since=since,
+            now=t1,
+        )
+        self.assertFalse(is_standby)
+        self.assertEqual(since2, t0)
+        self.assertEqual(remaining2, 90.0)
+
+        # At t0 + 120s -> standby is now True!
+        t2 = t0 + timedelta(seconds=120)
+        is_standby, since3, remaining3 = coordinator_mod.evaluate_power_standby(
+            power_watts=1.7,
+            threshold=5.0,
+            delay_seconds=120,
+            low_power_since=since2,
+            now=t2,
+        )
+        self.assertTrue(is_standby)
+        self.assertEqual(since3, t0)
+        self.assertIsNone(remaining3)
+
+        # Power jumps to 65 W -> exits standby immediately and resets `since`
+        t3 = t2 + timedelta(seconds=5)
+        is_standby, since4, remaining4 = coordinator_mod.evaluate_power_standby(
+            power_watts=65.0,
+            threshold=5.0,
+            delay_seconds=120,
+            low_power_since=since3,
+            now=t3,
+        )
+        self.assertFalse(is_standby)
+        self.assertIsNone(since4)
+        self.assertIsNone(remaining4)
+
+    def test_mode_sensor_returns_standby_when_power_standby_active(self) -> None:
+        data = {
+            "_power_standby": True,
+            "_power_watts": 1.8,
+            "_power_entity_id": "sensor.prise_cuisine_g_power",
+            "setting": {"mode": "standard", "ecoModeEnabled": False},
+            "details": {"settings": {"ecoModeEnabled": False}},
+        }
+        self.assertEqual(sensor_mod._get_mode(data), "standby")
+        attrs = sensor_mod._get_mode_attributes(data)
+        self.assertTrue(attrs["standby_detected_by_power"])
+        self.assertEqual(attrs["power_watts"], 1.8)
+
+        data["_power_standby"] = False
+        self.assertEqual(sensor_mod._get_mode(data), "standard")
+
+
 if __name__ == "__main__":
     unittest.main()

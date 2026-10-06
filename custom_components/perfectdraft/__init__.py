@@ -71,7 +71,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a PerfectDraft config entry."""
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
-        hass.data[DOMAIN].pop(entry.entry_id)
+        coordinator = hass.data[DOMAIN].pop(entry.entry_id, None)
+        if isinstance(coordinator, PerfectDraftDataUpdateCoordinator):
+            coordinator.async_shutdown_power_listener()
     if not hass.data.get(DOMAIN):
         hass.services.async_remove(DOMAIN, SERVICE_SET_POLL_INTERVAL)
     return unload_ok
