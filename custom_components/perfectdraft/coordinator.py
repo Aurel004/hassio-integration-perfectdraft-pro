@@ -92,14 +92,24 @@ def reconcile_settings(
             if key in hw and hw[key] is not None:
                 merged[key] = hw[key]
 
-    if merged.get("ecoModeEnabled") is False and merged.get("mode") == "eco":
-        merged["mode"] = "standard"
-    elif (
-        merged.get("ecoModeEnabled") is True
-        and merged.get("mode") in (None, "standard")
-        and merged.get("boost") is not True
-    ):
-        merged["mode"] = "eco"
+    if merged.get("ecoModeSchedulerEnabled") is True:
+        merged["mode"] = "cooling"
+    else:
+        if (
+            merged.get("ecoModeSchedulerEnabled") is False
+            and merged.get("mode") == "cooling"
+        ):
+            merged["mode"] = (
+                "eco" if merged.get("ecoModeEnabled") is True else "standard"
+            )
+        if merged.get("ecoModeEnabled") is False and merged.get("mode") == "eco":
+            merged["mode"] = "standard"
+        elif (
+            merged.get("ecoModeEnabled") is True
+            and merged.get("mode") in (None, "standard")
+            and merged.get("boost") is not True
+        ):
+            merged["mode"] = "eco"
 
     return merged, updated_at_str
 

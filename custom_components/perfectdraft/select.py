@@ -84,8 +84,6 @@ class PerfectDraftModeSelect(
         mode = _get_mode(self.coordinator.data or {})
         if mode in SELECTABLE_MODE_OPTIONS:
             return mode
-        if mode == "cooling":
-            return "boost"
         return None
 
     async def async_select_option(self, option: str) -> None:
@@ -97,6 +95,7 @@ class PerfectDraftModeSelect(
             mode=normalized,
             boost=(normalized == "boost"),
             ecoModeEnabled=(normalized == "eco"),
+            ecoModeSchedulerEnabled=False,
         )
 
 
