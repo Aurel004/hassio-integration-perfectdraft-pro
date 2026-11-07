@@ -342,28 +342,6 @@ class TestReconcileSettings(unittest.TestCase):
 
 
 
-class TestTimeToTargetSensor(unittest.TestCase):
-    def test_converts_milliseconds_to_minutes(self) -> None:
-        data = {"details": {"timeToReachTargetTemperature": 3258999}}
-        self.assertEqual(sensor_mod._get_time_to_target(data), 54)
-
-    def test_zero_milliseconds_returns_zero(self) -> None:
-        data = {"details": {"timeToReachTargetTemperature": 0}}
-        self.assertEqual(sensor_mod._get_time_to_target(data), 0)
-
-    def test_under_one_minute_rounds_up_to_one(self) -> None:
-        data = {"details": {"timeToReachTargetTemperature": 15000}}
-        self.assertEqual(sensor_mod._get_time_to_target(data), 1)
-
-    def test_invalid_or_negative_returns_none(self) -> None:
-        self.assertIsNone(sensor_mod._get_time_to_target({"details": {}}))
-        self.assertIsNone(
-            sensor_mod._get_time_to_target(
-                {"details": {"timeToReachTargetTemperature": -1}}
-            )
-        )
-
-
 class TestStandbyPowerDetection(unittest.TestCase):
     def test_parse_power_watts(self) -> None:
         self.assertEqual(coordinator_mod.parse_power_watts("2.4"), 2.4)

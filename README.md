@@ -10,7 +10,6 @@ A Home Assistant custom integration for the [PerfectDraft Pro](https://www.perfe
 |--------|-------------|------|
 | Temperature | Current beer temperature | °C |
 | Target Temperature | Configured target beer temperature | °C |
-| Time to Target Temperature | Estimated cooling time remaining to reach target temperature | min |
 | Keg | Name of the tapped beer, resolved from a [bundled catalog](#the-keg-name-catalog) of 117 kegs | — |
 | Keg Product | Numeric product ID of the fitted keg | — |
 | Keg Remaining | Beer left in the keg | % |

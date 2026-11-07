@@ -47,9 +47,6 @@
       "target_temperature": {
         "name": "Température cible"
       },
-      "time_to_target": {
-        "name": "Temps avant température cible"
-      },
       "keg_remaining": {
         "name": "Niveau du fût"
       },

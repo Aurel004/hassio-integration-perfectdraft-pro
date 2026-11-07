@@ -88,21 +88,6 @@ def _get_target_temperature(data: dict) -> float | None:
     return _parse_temp(val)
 
 
-def _get_time_to_target(data: dict) -> int | None:
-    val = _get_details(data).get("timeToReachTargetTemperature")
-    if val is None or isinstance(val, bool):
-        return None
-    try:
-        ms = float(val)
-    except (TypeError, ValueError):
-        return None
-    if ms < 0:
-        return None
-    if ms == 0:
-        return 0
-    return max(1, round(ms / 60000.0))
-
-
 def _get_volume_remaining(data: dict) -> float | None:
     vol = _get_details(data).get("kegVolume")
     if vol is None:
@@ -339,16 +324,6 @@ SENSOR_DESCRIPTIONS: tuple[PerfectDraftSensorDescription, ...] = (
         icon="mdi:thermostat",
         suggested_display_precision=0,
         value_fn=_get_target_temperature,
-    ),
-    PerfectDraftSensorDescription(
-        key="time_to_target",
-        translation_key="time_to_target",
-        device_class=SensorDeviceClass.DURATION,
-        native_unit_of_measurement=UnitOfTime.MINUTES,
-        state_class=SensorStateClass.MEASUREMENT,
-        icon="mdi:timer-sand",
-        suggested_display_precision=0,
-        value_fn=_get_time_to_target,
     ),
     PerfectDraftSensorDescription(
         key="keg_remaining",
