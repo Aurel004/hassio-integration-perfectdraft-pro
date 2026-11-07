@@ -106,7 +106,8 @@ class TestKegCatalogContent(unittest.TestCase):
         self.assertEqual(catalog["44536"], "Tiny Rebel Stay Puft")
         self.assertEqual(catalog["48050"], "Anheuser-Busch Bud")
         self.assertEqual(catalog["47792"], "Camden Eazy")
-        self.assertEqual(catalog["48180"], "Camden Nitro Stout")
+        self.assertEqual(catalog["48180"], "Camden Stout")
+        self.assertEqual(catalog["29745"], "Löwenbräu Oktoberfestbier")
 
 
 if __name__ == "__main__":

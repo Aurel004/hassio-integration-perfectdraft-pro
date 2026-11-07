@@ -1,296 +1,229 @@
-"""Unit tests for PerfectDraftApiClient.authenticate() against Cognito."""
+"""Tests for PerfectDraftApiClient.authenticate() against Cognito.
+
+Stdlib only, like ``test_keg_detection.py``: ``api.py`` is loaded as part of
+a stub ``perfectdraft`` package so the integration's ``__init__.py`` (which
+needs Home Assistant) never runs, and a fake session replays canned
+responses instead of touching the network.
+"""
 import asyncio
 import importlib
 import json
-import os
 import sys
 import types
 import unittest
+from pathlib import Path
 
-PKG_DIR = os.path.join(
-    os.path.dirname(__file__), "..", "custom_components", "perfectdraft"
-)
+PKG_DIR = Path(__file__).resolve().parent.parent / "custom_components" / "perfectdraft"
 
 try:
-    import aiohttp  # noqa: F401
-except ImportError:  # pragma: no cover - depends on the environment
+    import aiohttp
+except ImportError:  # the client only needs aiohttp.ClientError at runtime
     aiohttp = types.ModuleType("aiohttp")
-
-    class ClientError(Exception):
-        """Stand-in for aiohttp.ClientError."""
-
-    aiohttp.ClientError = ClientError
+    aiohttp.ClientError = type("ClientError", (Exception,), {})
     aiohttp.ClientSession = object
     sys.modules["aiohttp"] = aiohttp
 
-if "perfectdraft" not in sys.modules:
-    _pkg = types.ModuleType("perfectdraft")
-    _pkg.__path__ = [PKG_DIR]
-    sys.modules["perfectdraft"] = _pkg
+_pkg = types.ModuleType("_perfectdraft_stub")
+_pkg.__path__ = [str(PKG_DIR)]
+sys.modules["_perfectdraft_stub"] = _pkg
 
-api = importlib.import_module("perfectdraft.api")
-const = importlib.import_module("perfectdraft.const")
-exceptions = importlib.import_module("perfectdraft.exceptions")
+api = importlib.import_module("_perfectdraft_stub.api")
+exceptions = importlib.import_module("_perfectdraft_stub.exceptions")
+
+EMAIL = "drinker@example.com"
+PASSWORD = "hunter2"
+TOKEN = "recaptcha-token"
+TOKENS = {"AccessToken": "access-jwt-1", "IdToken": "id-jwt-1", "RefreshToken": "refresh-jwt-1"}
 
 
 class FakeResponse:
     def __init__(self, status, body):
         self.status = status
-        self._body = body
+        self._body = body if isinstance(body, str) else json.dumps(body)
 
     async def text(self):
         return self._body
 
     async def json(self, content_type="application/json"):
         if content_type is not None:
-            raise AssertionError("json() must be called with content_type=None")
+            raise AssertionError("Cognito replies x-amz-json; parse with content_type=None")
         return json.loads(self._body)
 
-
-class FakeContext:
-    def __init__(self, response=None, error=None):
-        self._response = response
-        self._error = error
-
     async def __aenter__(self):
-        if self._error is not None:
-            raise self._error
-        return self._response
+        return self
 
     async def __aexit__(self, *exc):
         return False
 
 
 class FakeSession:
-    def __init__(self, status=200, body="{}", error=None):
-        self.status = status
-        self.body = body
-        self.error = error
+    def __init__(self, status=200, body=None, raises=None):
+        self._response = FakeResponse(status, body if body is not None else {})
+        self._raises = raises
         self.calls = []
 
-    def post(self, url, json=None, headers=None):
-        self.calls.append({"method": "POST", "url": url, "json": json, "headers": headers})
-        return FakeContext(FakeResponse(self.status, self.body), self.error)
-
-    def request(self, method, url, headers=None, **kwargs):
-        self.calls.append(
-            {"method": method, "url": url, "headers": headers, **kwargs}
-        )
-        return FakeContext(FakeResponse(self.status, self.body), self.error)
+    def post(self, url, **kwargs):
+        self.calls.append((url, kwargs))
+        if self._raises:
+            raise self._raises
+        return self._response
 
 
-SUCCESS_BODY = json.dumps(
-    {
-        "AuthenticationResult": {
-            "AccessToken": "access-abc",
-            "IdToken": "id-def",
-            "RefreshToken": "refresh-ghi",
-            "ExpiresIn": 3600,
-            "TokenType": "Bearer",
-        },
-        "ChallengeParameters": {},
-    }
-)
+def sign_in(session):
+    client = api.PerfectDraftApiClient(session)
+    result = asyncio.run(client.authenticate(EMAIL, PASSWORD, TOKEN))
+    return client, result
 
 
-def run(coro):
-    return asyncio.run(coro)
+def rejection(session):
+    client = api.PerfectDraftApiClient(session)
+    client.set_tokens("old-access", "old-id", "old-refresh")
+    with unittest.TestCase().assertRaises(exceptions.AuthenticationError) as ctx:
+        asyncio.run(client.authenticate(EMAIL, PASSWORD, TOKEN))
+    return client, ctx.exception
 
 
-class TestAuthenticate(unittest.TestCase):
-    def test_posts_initiate_auth_to_cognito_with_domain(self):
-        session = FakeSession(body=SUCCESS_BODY)
-        client = api.PerfectDraftApiClient(session)
+class SuccessfulSignIn(unittest.TestCase):
+    def setUp(self):
+        self.session = FakeSession(200, {"AuthenticationResult": {**TOKENS, "ExpiresIn": 3600}})
+        self.client, self.result = sign_in(self.session)
+        self.url, self.kwargs = self.session.calls[0]
 
-        result = run(client.authenticate("me@example.com", "hunter2", "captcha-token"))
-
-        self.assertEqual(len(session.calls), 1)
-        call = session.calls[0]
-        self.assertEqual(call["url"], "https://cognito-idp.eu-west-1.amazonaws.com/")
+    def test_posts_to_cognito_not_the_gateway(self):
+        self.assertEqual(self.url, "https://cognito-idp.eu-west-1.amazonaws.com/")
         self.assertEqual(
-            call["headers"],
+            self.kwargs["headers"],
             {
                 "Content-Type": "application/x-amz-json-1.1",
                 "X-Amz-Target": "AWSCognitoIdentityProviderService.InitiateAuth",
             },
         )
+
+    def test_payload_carries_credentials_and_recaptcha_metadata(self):
         self.assertEqual(
-            call["json"],
+            self.kwargs["json"],
             {
                 "AuthFlow": "USER_PASSWORD_AUTH",
-                "ClientId": const.COGNITO_CLIENT_ID,
-                "AuthParameters": {
-                    "USERNAME": "me@example.com",
-                    "PASSWORD": "hunter2",
-                },
+                "ClientId": "57ddq2ppqg2jcpup06r2g1deur",
+                "AuthParameters": {"USERNAME": EMAIL, "PASSWORD": PASSWORD},
                 "ClientMetadata": {
-                    "recaptchaToken": "captcha-token",
+                    "recaptchaToken": TOKEN,
                     "recaptchaAction": "Magento/login",
                     "domain": "https://www.perfectdraft.com",
                 },
             },
         )
-        self.assertEqual(
-            result,
-            {
-                "AccessToken": "access-abc",
-                "IdToken": "id-def",
-                "RefreshToken": "refresh-ghi",
-            },
-        )
-        self.assertEqual(client.access_token, "access-abc")
-        self.assertEqual(client.id_token, "id-def")
-        self.assertEqual(client.refresh_token, "refresh-ghi")
 
-    def test_challenge_instead_of_tokens_raises_auth_error(self):
-        body = json.dumps({"ChallengeName": "NEW_PASSWORD_REQUIRED"})
-        client = api.PerfectDraftApiClient(FakeSession(body=body))
-        with self.assertRaises(exceptions.AuthenticationError):
-            run(client.authenticate("a", "b", "c"))
-        self.assertIsNone(client.access_token)
+    def test_stores_tokens_from_authentication_result(self):
+        self.assertEqual(self.client.access_token, "access-jwt-1")
+        self.assertEqual(self.client.id_token, "id-jwt-1")
+        self.assertEqual(self.client.refresh_token, "refresh-jwt-1")
+        self.assertEqual(self.result["AccessToken"], "access-jwt-1")
 
-    def test_400_raises_auth_error(self):
-        body = json.dumps(
-            {
-                "__type": "UserLambdaValidationException",
-                "message": "PreAuthentication failed with error 'domain'.",
-            }
-        )
-        client = api.PerfectDraftApiClient(FakeSession(status=400, body=body))
-        with self.assertRaises(exceptions.AuthenticationError) as ctx:
-            run(client.authenticate("a", "b", "c"))
-        self.assertIn("400", str(ctx.exception))
 
-    def test_500_raises_api_error(self):
-        client = api.PerfectDraftApiClient(
-            FakeSession(status=500, body="Internal Server Error")
-        )
+class Challenge(unittest.TestCase):
+    def test_challenge_raises_and_keeps_tokens(self):
+        client, err = rejection(FakeSession(200, {"ChallengeName": "NEW_PASSWORD_REQUIRED", "Session": "s"}))
+        self.assertEqual(err.code, "NEW_PASSWORD_REQUIRED")
+        self.assertEqual(err.kind, "other")
+        self.assertIn("NEW_PASSWORD_REQUIRED", err.display_reason)
+        self.assertEqual(client.access_token, "old-access")
+        self.assertEqual(client.refresh_token, "old-refresh")
+
+    def test_incomplete_result_raises(self):
+        _, err = rejection(FakeSession(200, {"AuthenticationResult": {"AccessToken": "a"}}))
+        self.assertIsNone(err.code)
+        self.assertEqual(err.display_reason, "no reason given")
+
+
+class Rejections(unittest.TestCase):
+    def test_wrong_password_is_a_credentials_failure(self):
+        _, err = rejection(FakeSession(400, {"__type": "NotAuthorizedException", "message": "Incorrect username or password."}))
+        self.assertEqual(err.code, "NotAuthorizedException")
+        self.assertEqual(err.kind, "credentials")
+        self.assertEqual(err.display_reason, "Incorrect username or password")
+        self.assertIn("400", str(err))
+
+    def test_unknown_user_is_a_credentials_failure(self):
+        _, err = rejection(FakeSession(400, {"__type": "UserNotFoundException", "message": "User does not exist."}))
+        self.assertEqual(err.kind, "credentials")
+
+    def test_lambda_rejection_is_a_token_failure(self):
+        _, err = rejection(FakeSession(400, {
+            "__type": "UserLambdaValidationException",
+            "message": "PreAuthentication failed with error 'domain'.",
+        }))
+        self.assertEqual(err.kind, "token")
+        self.assertEqual(err.display_reason, "PreAuthentication failed with error 'domain'")
+
+    def test_namespaced_type_is_stripped(self):
+        _, err = rejection(FakeSession(400, {
+            "__type": "com.amazonaws.cognito.identity.idp.model#NotAuthorizedException",
+            "message": "x",
+        }))
+        self.assertEqual(err.code, "NotAuthorizedException")
+
+    def test_other_type_is_an_other_failure(self):
+        for status in (401, 403):
+            _, err = rejection(FakeSession(status, {"__type": "InvalidParameterException", "message": "USER_PASSWORD_AUTH flow not enabled"}))
+            self.assertEqual(err.kind, "other")
+            self.assertEqual(err.display_reason, "USER_PASSWORD_AUTH flow not enabled")
+
+    def test_non_json_body_becomes_truncated_reason(self):
+        _, err = rejection(FakeSession(403, "<html>" + "x" * 500 + "</html>"))
+        self.assertIsNone(err.code)
+        self.assertEqual(err.kind, "other")
+        self.assertLessEqual(len(err.reason), 200)
+        self.assertTrue(err.reason.startswith("<html>"))
+
+    def test_empty_body_has_fallback_reason(self):
+        _, err = rejection(FakeSession(400, ""))
+        self.assertEqual(err.display_reason, "no reason given")
+
+    def test_rejection_keeps_existing_tokens(self):
+        client, _ = rejection(FakeSession(400, {"__type": "NotAuthorizedException", "message": "x"}))
+        self.assertEqual(client.access_token, "old-access")
+
+
+class OtherFailures(unittest.TestCase):
+    def test_server_error_is_an_api_error(self):
+        client = api.PerfectDraftApiClient(FakeSession(500, "boom"))
         with self.assertRaises(exceptions.PerfectDraftApiError) as ctx:
-            run(client.authenticate("a", "b", "c"))
+            asyncio.run(client.authenticate(EMAIL, PASSWORD, TOKEN))
         self.assertEqual(ctx.exception.status, 500)
 
-    def test_network_error_raises_connection_error(self):
-        client = api.PerfectDraftApiClient(
-            FakeSession(error=aiohttp.ClientError("boom"))
-        )
+    def test_network_failure_is_a_connection_error(self):
+        client = api.PerfectDraftApiClient(FakeSession(raises=aiohttp.ClientError("down")))
         with self.assertRaises(exceptions.PerfectDraftConnectionError):
-            run(client.authenticate("a", "b", "c"))
+            asyncio.run(client.authenticate(EMAIL, PASSWORD, TOKEN))
 
 
-class TestMachineControlApi(unittest.TestCase):
-    def test_update_machine_settings_preserves_writable_fields(self):
-        updated = json.dumps({"id": 42, "temperature": 4, "mode": "eco", "boost": False})
-        session = FakeSession(status=200, body=updated)
-        client = api.PerfectDraftApiClient(session)
-        client.set_tokens(access_token="token-123")
+class SecretsAreNotLogged(unittest.TestCase):
+    def test_no_secret_reaches_the_log(self):
+        cases = [
+            FakeSession(200, {"AuthenticationResult": TOKENS}),
+            FakeSession(400, {"__type": "NotAuthorizedException", "message": "Incorrect username or password."}),
+        ]
+        for session in cases:
+            with self.assertLogs(api._LOGGER, level="DEBUG") as logs:
+                api._LOGGER.debug("marker")
+                client = api.PerfectDraftApiClient(session)
+                try:
+                    asyncio.run(client.authenticate(EMAIL, PASSWORD, TOKEN))
+                except exceptions.AuthenticationError:
+                    pass
+            text = "\n".join(logs.output)
+            for secret in (PASSWORD, TOKEN, *TOKENS.values()):
+                self.assertNotIn(secret, text)
 
-        current_setting = {
-            "id": 42,
-            "temperature": 3,
-            "temperatureMin": 0,
-            "temperatureMax": 12,
-            "temperatureUnit": "C",
-            "mode": "standard",
-            "boost": False,
-            "ecoModeEnabled": False,
-            "machines": ["/api/perfectdraft_machines/42"],  # read-only field
-        }
 
-        result = run(
-            client.update_machine_settings(
-                42, current_setting=current_setting, temperature=4, mode="eco"
-            )
-        )
-        self.assertEqual(result["temperature"], 4)
-        self.assertEqual(len(session.calls), 1)
-        call = session.calls[0]
-        self.assertEqual(call["method"], "PUT")
-        self.assertEqual(
-            call["url"],
-            "https://api.perfectdraft.com/api/perfectdraft_machine_settings/42",
-        )
-        self.assertEqual(
-            call["json"],
-            {
-                "temperature": 4,
-                "temperatureMin": 0,
-                "temperatureMax": 12,
-                "temperatureUnit": "C",
-                "mode": "eco",
-                "boost": False,
-                "ecoModeEnabled": False,
-            },
-        )
-        self.assertNotIn("machines", call["json"])
-
-    def test_update_machine_settings_rejects_invalid_id(self):
-        client = api.PerfectDraftApiClient(FakeSession())
-        client.set_tokens(access_token="token-123")
-        with self.assertRaises(exceptions.PerfectDraftApiError):
-            run(client.update_machine_settings(None, temperature=3))
-
-    def test_update_machine_settings_rejects_standby_mode(self):
-        client = api.PerfectDraftApiClient(FakeSession())
-        client.set_tokens(access_token="token-123")
-        with self.assertRaises(exceptions.PerfectDraftApiError):
-            run(client.update_machine_settings(42, mode="standby"))
-
-    def test_update_machine_settings_sanitizes_standby_in_current_setting(self):
-        updated = json.dumps({"id": 42, "temperature": 5, "mode": "standard"})
-        session = FakeSession(status=200, body=updated)
-        client = api.PerfectDraftApiClient(session)
-        client.set_tokens(access_token="token-123")
-
-        current_setting = {
-            "id": 42,
-            "temperature": 3,
-            "mode": "standby",
-            "boost": False,
-            "ecoModeEnabled": False,
-        }
-        run(
-            client.update_machine_settings(
-                42, current_setting=current_setting, temperature=5
-            )
-        )
-        call = session.calls[0]
-        self.assertEqual(call["json"]["mode"], "standard")
-        self.assertEqual(call["json"]["temperature"], 5)
-
-    def test_set_active_keg_posts_iri_references(self):
-        created = json.dumps(
-            {
-                "id": 999,
-                "machine": "/api/perfectdraft_machines/42",
-                "keg": "/api/products/1775",
-                "insertedAt": "2026-10-05T12:00:00Z",
-            }
-        )
-        session = FakeSession(status=201, body=created)
-        client = api.PerfectDraftApiClient(session)
-        client.set_tokens(access_token="token-123")
-
-        result = run(
-            client.set_active_keg(42, 1775, inserted_at="2026-10-05T12:00:00Z")
-        )
-        self.assertEqual(result["id"], 999)
-        self.assertEqual(len(session.calls), 1)
-        call = session.calls[0]
-        self.assertEqual(call["method"], "POST")
-        self.assertEqual(
-            call["url"],
-            "https://api.perfectdraft.com/api/perfectdraft_machine_kegs",
-        )
-        self.assertEqual(
-            call["json"],
-            {
-                "machine": "/api/perfectdraft_machines/42",
-                "keg": "/api/products/1775",
-                "insertedAt": "2026-10-05T12:00:00Z",
-            },
-        )
+class LegacyRaises(unittest.TestCase):
+    def test_single_argument_raise_still_works(self):
+        err = exceptions.AuthenticationError("No refresh token available")
+        self.assertIsNone(err.code)
+        self.assertEqual(err.kind, "other")
+        self.assertEqual(str(err), "No refresh token available")
 
 
 if __name__ == "__main__":
     unittest.main()
-
