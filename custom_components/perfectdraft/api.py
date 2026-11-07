@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+
 import json
 import logging
 from typing import Any
@@ -26,11 +27,6 @@ from .exceptions import (
 _LOGGER = logging.getLogger(__name__)
 
 COGNITO_IDP_URL = f"https://cognito-idp.{COGNITO_REGION}.amazonaws.com/"
-COGNITO_HEADERS = {
-    "Content-Type": "application/x-amz-json-1.1",
-    "X-Amz-Target": "AWSCognitoIdentityProviderService.InitiateAuth",
-}
-
 _WRITABLE_SETTING_FIELDS = (
     "temperature",
     "temperatureMin",
@@ -45,6 +41,11 @@ _WRITABLE_SETTING_FIELDS = (
     "ecoModeAbortedByAppliance",
     "mode",
 )
+
+COGNITO_HEADERS = {
+    "Content-Type": "application/x-amz-json-1.1",
+    "X-Amz-Target": "AWSCognitoIdentityProviderService.InitiateAuth",
+}
 
 
 def _parse_cognito_error(body: str) -> tuple[str | None, str | None]:
@@ -70,41 +71,38 @@ def _parse_cognito_error(body: str) -> tuple[str | None, str | None]:
 
 
 class PerfectDraftApiClient:
-    """Client for api.perfectdraft.com."""
+    """Async client for api.perfectdraft.com with Cognito token refresh."""
 
-    def __init__(
-        self,
-        session: aiohttp.ClientSession,
-        access_token: str | None = None,
-        refresh_token: str | None = None,
-        base_url: str = API_BASE_URL,
-    ) -> None:
+    def __init__(self, session: aiohttp.ClientSession) -> None:
         self._session = session
-        self._base = base_url.rstrip("/")
-        self._access_token = access_token
+        self._base = API_BASE_URL
+        self._access_token: str | None = None
         self._id_token: str | None = None
-        self._refresh_token = refresh_token
+        self._refresh_token: str | None = None
 
     @property
     def access_token(self) -> str | None:
         return self._access_token
 
     @property
-    def id_token(self) -> str | None:
-        return self._id_token
-
-    @property
     def refresh_token(self) -> str | None:
         return self._refresh_token
 
+    @property
+    def id_token(self) -> str | None:
+        return self._id_token
+
     def set_tokens(
         self,
-        access_token: str | None,
+        access_token: str | None = None,
         id_token: str | None = None,
         refresh_token: str | None = None,
     ) -> None:
-        self._access_token = access_token
-        self._id_token = id_token
+        """Restore tokens from persisted config entry data."""
+        if access_token is not None:
+            self._access_token = access_token
+        if id_token is not None:
+            self._id_token = id_token
         if refresh_token is not None:
             self._refresh_token = refresh_token
 
@@ -172,6 +170,10 @@ class PerfectDraftApiClient:
         if not self._refresh_token:
             raise AuthenticationError("No refresh token available")
 
+        headers = {
+            "Content-Type": "application/x-amz-json-1.1",
+            "X-Amz-Target": "AWSCognitoIdentityProviderService.InitiateAuth",
+        }
         payload = {
             "AuthFlow": "REFRESH_TOKEN_AUTH",
             "ClientId": COGNITO_CLIENT_ID,
@@ -182,15 +184,12 @@ class PerfectDraftApiClient:
 
         try:
             async with self._session.post(
-                COGNITO_IDP_URL, json=payload, headers=COGNITO_HEADERS
+                COGNITO_IDP_URL, json=payload, headers=headers
             ) as resp:
                 if resp.status in (400, 401, 403):
                     body = await resp.text()
-                    code, reason = _parse_cognito_error(body)
                     raise AuthenticationError(
-                        f"Token refresh rejected ({resp.status}): {body}",
-                        code=code,
-                        reason=reason,
+                        f"Cognito refresh failed ({resp.status}): {body}"
                     )
                 if resp.status != 200:
                     body = await resp.text()
@@ -200,84 +199,76 @@ class PerfectDraftApiClient:
             raise PerfectDraftConnectionError(str(exc)) from exc
 
         result = data.get("AuthenticationResult", {})
-        if "AccessToken" not in result:
-            raise AuthenticationError(
-                "Refresh response missing AccessToken: " + json.dumps(data)
-            )
+        self._access_token = result.get("AccessToken", self._access_token)
+        self._id_token = result.get("IdToken", self._id_token)
+        # Cognito refresh doesn't return a new RefreshToken — the original stays valid
 
-        self._access_token = result["AccessToken"]
-        if "IdToken" in result:
-            self._id_token = result["IdToken"]
-        if "RefreshToken" in result:
-            self._refresh_token = result["RefreshToken"]
-
-        _LOGGER.debug("Refreshed tokens successfully")
+        _LOGGER.debug("Token refreshed via Cognito (expires in %ss)", result.get("ExpiresIn"))
         return result
 
     async def _request(
-        self,
-        method: str,
-        path: str,
-        authenticated: bool = True,
-        retry_on_auth_failure: bool = True,
-        **kwargs: Any,
-    ) -> Any:
-        url = f"{self._base}/{path.lstrip('/')}"
-        headers = dict(kwargs.pop("headers", {}) or {})
-        headers.setdefault("x-api-key", API_KEY)
-        headers.setdefault("Accept", "application/ld+json")
-
-        if authenticated:
-            if not self._access_token:
-                raise AuthenticationError("Not authenticated")
-            headers["Authorization"] = f"Bearer {self._access_token}"
+        self, method: str, path: str, **kwargs: Any
+    ) -> dict[str, Any]:
+        """Make an authenticated API request with automatic 401 retry."""
+        url = f"{self._base}{path}"
+        headers = kwargs.pop("headers", {})
+        headers["x-api-key"] = API_KEY
+        if self._access_token:
+            headers["x-access-token"] = self._access_token
 
         try:
             async with self._session.request(
                 method, url, headers=headers, **kwargs
             ) as resp:
-                if resp.status == 401 and retry_on_auth_failure:
-                    _LOGGER.info("Received 401, attempting token refresh")
-                    try:
-                        await self.refresh_access_token()
-                    except AuthenticationError as exc:
-                        _LOGGER.warning("Token refresh failed: %s", exc)
-                        raise
-                    return await self._request(
-                        method,
-                        path,
-                        authenticated=authenticated,
-                        retry_on_auth_failure=False,
-                        headers=headers,
-                        **kwargs,
-                    )
+                if resp.status == 401:
+                    _LOGGER.debug("Got 401, attempting Cognito token refresh")
+                    await self.refresh_access_token()
+                    headers["x-access-token"] = self._access_token or ""
+                    async with self._session.request(
+                        method, url, headers=headers, **kwargs
+                    ) as retry_resp:
+                        if retry_resp.status == 401:
+                            raise AuthenticationError(
+                                "Still unauthorized after token refresh"
+                            )
+                        if retry_resp.status == 429:
+                            raise PerfectDraftApiError(429, "Rate limited")
+                        if retry_resp.status >= 400:
+                            body = await retry_resp.text()
+                            raise PerfectDraftApiError(retry_resp.status, body)
+                        return await retry_resp.json()
 
-                if resp.status in (401, 403):
-                    body = await resp.text()
-                    raise AuthenticationError(f"HTTP {resp.status}: {body}")
+                if resp.status == 429:
+                    raise PerfectDraftApiError(429, "Rate limited")
                 if resp.status >= 400:
                     body = await resp.text()
                     raise PerfectDraftApiError(resp.status, body)
-                return await resp.json(content_type=None)
+                return await resp.json()
         except aiohttp.ClientError as exc:
             raise PerfectDraftConnectionError(str(exc)) from exc
 
     async def get_user_profile(self) -> dict[str, Any]:
-        """GET /api/me."""
+        """GET /api/me — returns user profile including machine IDs."""
         return await self._request("GET", "/api/me")
 
-    async def get_machines(self) -> list[dict[str, Any]]:
-        """Return the user's machines extracted from get_user_profile()."""
-        profile = await self.get_user_profile()
-        machines = profile.get("perfectdraftMachines")
-        if isinstance(machines, list):
-            return machines
-        return []
-
-    async def get_machine(self, machine_id: str) -> dict[str, Any]:
-        """GET /api/perfectdraft_machines/{id} — returns full machine details."""
+    async def get_machine_details(self, machine_id: str) -> dict[str, Any]:
+        """GET /api/perfectdraft_machines/{machine_id} — full machine status."""
         return await self._request(
             "GET", f"/api/perfectdraft_machines/{machine_id}"
+        )
+
+    async def get_machine_active_keg(self, machine_id: str) -> dict[str, Any]:
+        """GET the machine serialized with the active-keg group.
+
+        Returns the machine with a ``kegActive`` object holding the currently
+        tapped keg's product reference and its insertion date. This group is
+        mutually exclusive with the default status fields, so it needs its own
+        request alongside get_machine_details.
+        """
+        return await self._request(
+            "GET",
+            f"/api/perfectdraft_machines/{machine_id}",
+            params={"groups[]": "perfectdraft_keg_active_read"},
         )
 
     async def get_machine_settings(self, setting_id: str | int) -> dict[str, Any]:
@@ -288,18 +279,6 @@ class PerfectDraftApiClient:
         """
         return await self._request(
             "GET", f"/api/perfectdraft_machine_settings/{setting_id}"
-        )
-
-    async def get_machine_active_keg(self, machine_id: str) -> dict[str, Any]:
-        """GET the machine serialized with the active-keg group.
-
-        Returns only the fields permitted in ``perfectdraft_keg_active_read``,
-        including ``activeKeg`` with nested ``product`` information.
-        """
-        return await self._request(
-            "GET",
-            f"/api/perfectdraft_machines/{machine_id}",
-            params={"groups[]": "perfectdraft_keg_active_read"},
         )
 
     async def update_machine_settings(
@@ -388,3 +367,5 @@ class PerfectDraftApiClient:
         return await self._request(
             "POST", "/api/perfectdraft_machine_kegs", json=payload
         )
+    # Backward compatibility alias
+    get_machine = get_machine_details
