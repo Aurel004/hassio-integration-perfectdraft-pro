@@ -20,7 +20,7 @@ from .sensor import (
 )
 
 
-def _build_keg_maps(catalog: dict[str, str]) -> tuple[list[str], dict[str, int], dict[int, str]]:
+def _build_keg_maps(catalog: dict[int, str]) -> tuple[list[str], dict[str, int], dict[int, str]]:
     """Build sorted option list and bidirectional mappings between display name and product ID."""
     name_counts: dict[str, int] = {}
     for name in catalog.values():
@@ -28,11 +28,7 @@ def _build_keg_maps(catalog: dict[str, str]) -> tuple[list[str], dict[str, int],
 
     option_to_id: dict[str, int] = {}
     id_to_option: dict[int, str] = {}
-    for pid_str, name in catalog.items():
-        try:
-            pid = int(pid_str)
-        except (TypeError, ValueError):
-            continue
+    for pid, name in catalog.items():
         label = f"{name} (#{pid})" if name_counts.get(name, 0) > 1 else name
         option_to_id[label] = pid
         id_to_option[pid] = label

@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-
 import json
 import logging
 from typing import Any
@@ -367,5 +366,3 @@ class PerfectDraftApiClient:
         return await self._request(
             "POST", "/api/perfectdraft_machine_kegs", json=payload
         )
-    # Backward compatibility alias
-    get_machine = get_machine_details
