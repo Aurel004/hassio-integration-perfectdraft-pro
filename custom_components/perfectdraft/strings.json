@@ -90,8 +90,7 @@
         "name": "Mode",
         "state": {
           "standard": "Standard",
-          "eco": "Eco",
-          "boost": "Boost"
+          "eco": "Eco"
         }
       },
       "active_keg": { "name": "Active Keg" }

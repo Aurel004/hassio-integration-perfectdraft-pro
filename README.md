@@ -30,7 +30,7 @@ A Home Assistant custom integration for the [PerfectDraft Pro](https://www.perfe
 | Control | Platform | Description |
 |---------|----------|-------------|
 | Target Temperature | `number` | Adjust target beer temperature (`0 °C` – `12 °C`) |
-| Mode | `select` | Switch operating mode (`Standard`, `Eco`, `Boost`) |
+| Mode | `select` | Switch operating mode (`Standard`, `Eco`) |
 | Active Keg | `select` | Select the currently installed beer keg from the catalog |
 | Mark Keg Changed | `button` | Reset the 30-day freshness countdown and sync insertion date |
 

@@ -23,6 +23,12 @@ MIN_TARGET_TEMP = 0.0
 MAX_TARGET_TEMP = 12.0
 
 
+def _is_eco(data: dict[str, Any] | None) -> bool:
+    """Return True when the machine setting says Eco mode is on."""
+    setting = (data or {}).get("setting") or {}
+    return setting.get("mode") == "eco" or setting.get("ecoModeEnabled") is True
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -80,4 +86,10 @@ class PerfectDraftTargetTemperatureNumber(
                 f"Target temperature {value}°C is outside allowed range ({MIN_TARGET_TEMP}°C - {MAX_TARGET_TEMP}°C)"
             )
         target = int(round(value))
-        await self.coordinator.async_update_settings(temperature=target)
+        changes: dict[str, Any] = {"temperature": target}
+        if _is_eco(self.coordinator.data):
+            # Eco cools to its own setpoint and ignores "temperature", so a new
+            # target only takes effect in Standard. The PerfectDraft app does
+            # the same: changing the temperature while in Eco leaves Eco.
+            changes.update(mode="standard", ecoModeEnabled=False)
+        await self.coordinator.async_update_settings(**changes)

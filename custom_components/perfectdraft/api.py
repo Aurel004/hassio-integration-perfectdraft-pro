@@ -309,16 +309,13 @@ class PerfectDraftApiClient:
             if key in _WRITABLE_SETTING_FIELDS:
                 payload[key] = val
 
-        # The PerfectDraft backend PHP match($mode) only handles selectable modes
-        # ("standard", "eco", "boost") and throws a 500 UnhandledMatchError if a
-        # read-only appliance state ("standby", "cooling") is sent back in PUT.
+        # On PUT the backend's PHP match($mode) only handles "standard" and
+        # "eco": "boost", "cooling" and "standby" all fail with a 500
+        # UnhandledMatchError, so a read-only state is mapped back first.
         if "mode" in payload and payload["mode"] not in SELECTABLE_MODE_OPTIONS:
-            if payload.get("boost") is True:
-                payload["mode"] = "boost"
-            elif payload.get("ecoModeEnabled") is True:
-                payload["mode"] = "eco"
-            else:
-                payload["mode"] = "standard"
+            payload["mode"] = (
+                "eco" if payload.get("ecoModeEnabled") is True else "standard"
+            )
 
         return await self._request(
             "PUT",

@@ -89,7 +89,7 @@ class PerfectDraftModeSelect(
             raise HomeAssistantError(f"Unsupported mode: {option}")
         await self.coordinator.async_update_settings(
             mode=normalized,
-            boost=(normalized == "boost"),
+            boost=False,
             ecoModeEnabled=(normalized == "eco"),
             ecoModeSchedulerEnabled=False,
         )

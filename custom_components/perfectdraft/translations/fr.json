@@ -120,8 +120,7 @@
         "name": "Mode",
         "state": {
           "standard": "Standard",
-          "eco": "Éco",
-          "boost": "Boost"
+          "eco": "Éco"
         }
       },
       "active_keg": {

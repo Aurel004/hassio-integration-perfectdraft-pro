@@ -28,7 +28,7 @@ DEFAULT_STANDBY_POWER_THRESHOLD = 5.0  # Watts
 DEFAULT_STANDBY_DELAY = 120  # seconds (2 minutes)
 
 MODE_OPTIONS = ("standard", "eco", "boost", "cooling", "standby")
-SELECTABLE_MODE_OPTIONS = ("standard", "eco", "boost")
+SELECTABLE_MODE_OPTIONS = ("standard", "eco")
 
 PLATFORMS = ["sensor", "button", "number", "select"]
 
